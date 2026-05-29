@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const basisData = require('../shared/basis_data');
+const { Validator } = require('../shared/basis_data');
 const { verifikasiToken, hanyaManajerAtauAdmin } = require('../shared/middleware_auth');
 
 const app = express();
@@ -14,53 +15,91 @@ const PORT = 5002;
 
 
 // GET /api/barang - Daftar semua barang
+// Gunakan cache katalog NoSQL jika tersedia dan masih segar
 app.get('/api/barang', verifikasiToken, (req, res) => {
+  const cache = basisData.ambilCacheKatalog();
+
+  if (cache) {
+    return res.json({
+      sukses: true,
+      data: cache.data,
+      dari_cache: true,
+      cache_diperbarui: cache.diperbarui_pada
+    });
+  }
+
+  // Fallback: ambil langsung dari SQL jika cache tidak ada
   const barang = basisData.ambilSemua('barang');
-  return res.json({ sukses: true, data: barang });
+  return res.json({ sukses: true, data: barang, dari_cache: false });
 });
 
 // POST /api/barang - Tambah barang baru (Hanya Manajer/Admin)
 app.post('/api/barang', verifikasiToken, hanyaManajerAtauAdmin, (req, res) => {
   const { kode_barcode, nama_barang, kategori, satuan, harga_jual, harga_pokok, url_gambar } = req.body;
 
-  if (!kode_barcode || !nama_barang || !harga_jual || !harga_pokok) {
-    return res.status(400).json({ sukses: false, pesan: "Barcode, nama, harga jual, dan harga pokok wajib diisi." });
+  // Validasi input ketat
+  if (!Validator.teks(kode_barcode, 20)) {
+    return res.status(400).json({ sukses: false, pesan: "Kode barcode tidak valid. Maksimal 20 karakter." });
+  }
+  if (!Validator.teks(nama_barang, 150)) {
+    return res.status(400).json({ sukses: false, pesan: "Nama barang tidak valid. Maksimal 150 karakter." });
+  }
+  if (!Validator.angka(harga_jual, 1, 99999999)) {
+    return res.status(400).json({ sukses: false, pesan: "Harga jual tidak valid. Harus angka positif." });
+  }
+  if (!Validator.angka(harga_pokok, 0, 99999999)) {
+    return res.status(400).json({ sukses: false, pesan: "Harga pokok tidak valid. Harus angka non-negatif." });
+  }
+  if (Number(harga_pokok) >= Number(harga_jual)) {
+    return res.status(400).json({ sukses: false, pesan: "Harga pokok tidak boleh lebih besar atau sama dengan harga jual." });
   }
 
   // Cek barcode unik
-  const barangEksis = basisData.cariSatu('barang', b => b.kode_barcode === kode_barcode);
+  const barangEksis = basisData.cariSatu('barang', b => b.kode_barcode === kode_barcode.trim());
   if (barangEksis) {
     return res.status(400).json({ sukses: false, pesan: "Barcode produk sudah terdaftar." });
   }
 
+  const kategoriBersih = kategori && ['MAKANAN', 'MINUMAN', 'UMUM'].includes(kategori.toUpperCase())
+    ? kategori.toUpperCase()
+    : 'UMUM';
+
   const barangBaru = basisData.tambah('barang', {
-    kode_barcode,
-    nama_barang,
-    kategori: kategori || "UMUM",
-    satuan: satuan || "pcs",
+    kode_barcode: Validator.bersihkan(kode_barcode).trim(),
+    nama_barang: Validator.bersihkan(nama_barang).toUpperCase(),
+    kategori: kategoriBersih,
+    satuan: satuan ? Validator.bersihkan(satuan).toLowerCase() : 'pcs',
     harga_jual: Number(harga_jual),
     harga_pokok: Number(harga_pokok),
-    url_gambar: url_gambar || "📦",
+    url_gambar: url_gambar ? Validator.bersihkan(url_gambar) : "inventory_2",
     is_aktif: 1
   });
 
   // Tambahkan baris stok untuk semua cabang yang ada
   const semuaCabang = basisData.ambilSemua('cabang');
+  const hariIni = new Date().toISOString().split('T')[0];
   semuaCabang.forEach(cabang => {
     basisData.tambah('stok', {
       cabang_id: cabang.id,
       barang_id: barangBaru.id,
-      terjual: 0, // Awal mula belum ada yang terjual
-      target_harian: 100, // Default target 100
+      terjual: 0,
+      terjual_terakhir_reset: hariIni,
+      target_harian: 100,
       diperbarui_pada: new Date().toISOString()
     });
   });
+
+  // Invalidasi cache katalog agar ter-refresh
+  basisData.perbaruiCacheKatalog();
 
   return res.status(201).json({ sukses: true, pesan: "Barang berhasil ditambahkan.", data: barangBaru });
 });
 
 // GET /api/barang/:id - Detail satu barang
 app.get('/api/barang/:id', verifikasiToken, (req, res) => {
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
+  }
   const barang = basisData.ambilBerdasarkanId('barang', req.params.id);
   if (!barang) {
     return res.status(404).json({ sukses: false, pesan: "Barang tidak ditemukan." });
@@ -70,17 +109,56 @@ app.get('/api/barang/:id', verifikasiToken, (req, res) => {
 
 // PUT /api/barang/:id - Perbarui barang (Hanya Manajer/Admin)
 app.put('/api/barang/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) => {
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
+  }
   const barang = basisData.ambilBerdasarkanId('barang', req.params.id);
   if (!barang) {
     return res.status(404).json({ sukses: false, pesan: "Barang tidak ditemukan." });
   }
 
-  const updated = basisData.perbarui('barang', req.params.id, req.body);
+  const payload = {};
+  if (req.body.nama_barang !== undefined) {
+    if (!Validator.teks(req.body.nama_barang, 150)) {
+      return res.status(400).json({ sukses: false, pesan: "Nama barang tidak valid." });
+    }
+    payload.nama_barang = Validator.bersihkan(req.body.nama_barang).toUpperCase();
+  }
+  if (req.body.harga_jual !== undefined) {
+    if (!Validator.angka(req.body.harga_jual, 1, 99999999)) {
+      return res.status(400).json({ sukses: false, pesan: "Harga jual tidak valid." });
+    }
+    payload.harga_jual = Number(req.body.harga_jual);
+  }
+  if (req.body.harga_pokok !== undefined) {
+    if (!Validator.angka(req.body.harga_pokok, 0, 99999999)) {
+      return res.status(400).json({ sukses: false, pesan: "Harga pokok tidak valid." });
+    }
+    payload.harga_pokok = Number(req.body.harga_pokok);
+  }
+  if (req.body.kategori !== undefined) {
+    if (!['MAKANAN', 'MINUMAN', 'UMUM'].includes(req.body.kategori.toUpperCase())) {
+      return res.status(400).json({ sukses: false, pesan: "Kategori tidak valid." });
+    }
+    payload.kategori = req.body.kategori.toUpperCase();
+  }
+  if (req.body.satuan !== undefined) payload.satuan = Validator.bersihkan(req.body.satuan);
+  if (req.body.url_gambar !== undefined) payload.url_gambar = Validator.bersihkan(req.body.url_gambar);
+  if (req.body.is_aktif !== undefined) payload.is_aktif = req.body.is_aktif ? 1 : 0;
+
+  const updated = basisData.perbarui('barang', req.params.id, payload);
+
+  // Invalidasi cache katalog setelah perubahan
+  basisData.perbaruiCacheKatalog();
+
   return res.json({ sukses: true, pesan: "Barang berhasil diperbarui.", data: updated });
 });
 
-// DELETE /api/barang/:id - Hapus barang (Hanya Manajer/Admin)
+// DELETE /api/barang/:id - Hapus barang / soft delete (Hanya Manajer/Admin)
 app.delete('/api/barang/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) => {
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
+  }
   const barang = basisData.ambilBerdasarkanId('barang', req.params.id);
   if (!barang) {
     return res.status(404).json({ sukses: false, pesan: "Barang tidak ditemukan." });
@@ -88,15 +166,21 @@ app.delete('/api/barang/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res)
 
   // Soft delete
   basisData.perbarui('barang', req.params.id, { is_aktif: 0 });
+
+  // Invalidasi cache katalog
+  basisData.perbaruiCacheKatalog();
+
   return res.json({ sukses: true, pesan: "Barang berhasil dinonaktifkan." });
 });
 
 // GET /api/barang/:id/target - Cek target & terjual per cabang
 app.get('/api/barang/:id/target', verifikasiToken, (req, res) => {
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
+  }
   const barangId = Number(req.params.id);
   const daftarStok = basisData.cariSemua('stok', s => s.barang_id === barangId);
-  
-  // Gabungkan dengan info cabang
+
   const dataStokCabang = daftarStok.map(s => {
     const cabang = basisData.ambilBerdasarkanId('cabang', s.cabang_id);
     return {
@@ -105,18 +189,24 @@ app.get('/api/barang/:id/target', verifikasiToken, (req, res) => {
       nama_cabang: cabang ? cabang.nama_cabang : "Cabang Tidak Diketahui",
       kota: cabang ? cabang.kota : "-",
       terjual: s.terjual || 0,
-      target_harian: s.target_harian || 100
+      target_harian: s.target_harian || 100,
+      terjual_terakhir_reset: s.terjual_terakhir_reset || null
     };
   });
-  
+
   return res.json({ sukses: true, data: dataStokCabang });
 });
 
 // PUT /api/target/:id - Atur target harian (Hanya Manajer/Admin)
 app.put('/api/target/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) => {
   const { target_baru } = req.body;
-  if (!target_baru || isNaN(target_baru) || Number(target_baru) < 0) {
-    return res.status(400).json({ sukses: false, pesan: "Target harian tidak valid." });
+
+  if (!Validator.angka(target_baru, 1, 99999)) {
+    return res.status(400).json({ sukses: false, pesan: "Target harian tidak valid. Harus angka positif maksimal 99.999." });
+  }
+
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
   }
 
   const stok = basisData.ambilBerdasarkanId('stok', req.params.id);
@@ -124,9 +214,8 @@ app.put('/api/target/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) =>
     return res.status(404).json({ sukses: false, pesan: "Data target tidak ditemukan." });
   }
 
-  const targetHarianBaru = Number(target_baru);
   const updatedStok = basisData.perbarui('stok', req.params.id, {
-    target_harian: targetHarianBaru,
+    target_harian: Number(target_baru),
     diperbarui_pada: new Date().toISOString()
   });
 
@@ -134,31 +223,53 @@ app.put('/api/target/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) =>
 });
 
 
+
 // 2. TRANSAKSI POS & SINKRONISASI
 
 
 // POST /api/transaksi - Buat transaksi POS baru
 app.post('/api/transaksi', verifikasiToken, (req, res) => {
-  const { 
-    cabang_id, 
-    kasir_id, 
-    shift_id, 
-    total_belanja, 
-    diskon, 
-    pajak, 
-    metode_pembayaran, 
-    jumlah_bayar, 
+  const {
+    cabang_id,
+    kasir_id,
+    shift_id,
+    total_belanja,
+    diskon,
+    pajak,
+    metode_pembayaran,
+    jumlah_bayar,
     jumlah_kembalian,
-    item, 
-    offline, 
-    id_offline 
+    item,
+    offline,
+    id_offline
   } = req.body;
 
-  if (!total_belanja || !item || !item.length) {
-    return res.status(400).json({ sukses: false, pesan: "Data transaksi atau item keranjang tidak lengkap." });
+  // Validasi input transaksi
+  if (!item || !Array.isArray(item) || item.length === 0) {
+    return res.status(400).json({ sukses: false, pesan: "Item keranjang tidak boleh kosong." });
+  }
+  if (!Validator.angka(total_belanja, 1, 999999999)) {
+    return res.status(400).json({ sukses: false, pesan: "Total belanja tidak valid." });
+  }
+  const metodeBayarDiizinkan = ['tunai', 'qris', 'debit', 'credit'];
+  if (!metode_pembayaran || !metodeBayarDiizinkan.includes(metode_pembayaran)) {
+    return res.status(400).json({ sukses: false, pesan: "Metode pembayaran tidak valid." });
   }
 
-  // Jika kasir memilih mode offline, simpan transaksi ke NoSQL transaksi_offline
+  // Validasi setiap item
+  for (const itm of item) {
+    if (!Validator.angka(itm.barang_id, 1)) {
+      return res.status(400).json({ sukses: false, pesan: "ID barang pada item tidak valid." });
+    }
+    if (!Validator.angka(itm.jumlah, 1, 9999)) {
+      return res.status(400).json({ sukses: false, pesan: "Jumlah item tidak valid." });
+    }
+    if (!Validator.angka(itm.harga_satuan, 1, 99999999)) {
+      return res.status(400).json({ sukses: false, pesan: "Harga satuan item tidak valid." });
+    }
+  }
+
+  // MODE OFFLINE: simpan ke koleksi transaksi_offline (NoSQL)
   if (offline) {
     const transaksiOffline = basisData.tambah('transaksi_offline', {
       id_offline: id_offline || `OFF-${Date.now()}`,
@@ -168,15 +279,14 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
       total_belanja: Number(total_belanja),
       diskon: Number(diskon || 0),
       pajak: Number(pajak || 0),
-      metode_pembayaran: metode_pembayaran || "tunai",
+      metode_pembayaran,
       jumlah_bayar: Number(jumlah_bayar),
       jumlah_kembalian: Number(jumlah_kembalian),
-      item: item,
+      item,
       synced: 0,
       dibuat_pada: new Date().toISOString()
     });
 
-    // Tambah log aktivitas perangkat
     basisData.tambah('log_perangkat', {
       cabang_id: Number(cabang_id || req.kasir.cabang_id),
       kasir_id: Number(kasir_id || req.kasir.id),
@@ -193,7 +303,7 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
     });
   }
 
-  // JIKA ONLINE: Validasi shift kasir terlebih dahulu
+  // MODE ONLINE: validasi shift aktif
   if (shift_id) {
     const shift = basisData.ambilBerdasarkanId('shift_kasir', shift_id);
     if (!shift || shift.status !== 'buka') {
@@ -201,7 +311,6 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
     }
   }
 
-  // Kurangi stok barang dan buat baris database relasional SQL
   const kodeTransaksi = `TX-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
   const cabangId = Number(cabang_id || req.kasir.cabang_id);
 
@@ -213,10 +322,24 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
     total_belanja: Number(total_belanja),
     diskon: Number(diskon || 0),
     pajak: Number(pajak || 0),
-    metode_pembayaran: metode_pembayaran || "tunai",
+    metode_pembayaran,
     jumlah_bayar: Number(jumlah_bayar),
     jumlah_kembalian: Number(jumlah_kembalian),
-    status_sinkronisasi: 1, // Sudah sinkron karena dibuat online
+    status_sinkronisasi: 1,
+    dibuat_pada: new Date().toISOString()
+  });
+
+  // Simpan pembayaran ke tabel terpisah
+  basisData.tambah('pembayaran', {
+    transaksi_id: transaksiBaru.id,
+    metode: metode_pembayaran,
+    jumlah: Number(total_belanja),
+    // Tunai: uang diterima dan kembalian relevan
+    // Non-tunai: langsung lunas, tidak ada kembalian fisik
+    jumlah_bayar: ['tunai'].includes(metode_pembayaran) ? Number(jumlah_bayar) : Number(total_belanja),
+    jumlah_kembalian: ['tunai'].includes(metode_pembayaran) ? Number(jumlah_kembalian) : 0,
+    status: "sukses",
+    referensi: metode_pembayaran !== 'tunai' ? `REF-${Date.now()}` : null,
     dibuat_pada: new Date().toISOString()
   });
 
@@ -230,7 +353,7 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
       subtotal: Number(itm.jumlah) * Number(itm.harga_satuan)
     });
 
-    // Tambahkan angka terjual di cabang tersebut
+    // Update terjual di stok cabang
     const recordStok = basisData.cariSatu('stok', s => s.cabang_id === cabangId && s.barang_id === itm.barang_id);
     if (recordStok) {
       const totalTerjual = Number(recordStok.terjual || 0) + Number(itm.jumlah);
@@ -241,12 +364,19 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
     }
   });
 
-  // Perbarui total_penjualan pada shift kasir jika ada
+  // Update total_penjualan pada shift kasir
   if (shift_id) {
     const shift = basisData.ambilBerdasarkanId('shift_kasir', shift_id);
     if (shift) {
       const totalBaru = Number(shift.total_penjualan || 0) + Number(total_belanja);
-      basisData.perbarui('shift_kasir', shift_id, { total_penjualan: totalBaru });
+      // Pisahkan antara penjualan tunai dan non-tunai untuk rekonsiliasi kas
+      const penjualanTunaiBaru = Number(shift.penjualan_tunai || 0) + (metode_pembayaran === 'tunai' ? Number(total_belanja) : 0);
+      const penjualanNonTunaiBaru = Number(shift.penjualan_non_tunai || 0) + (metode_pembayaran !== 'tunai' ? Number(total_belanja) : 0);
+      basisData.perbarui('shift_kasir', shift_id, {
+        total_penjualan: totalBaru,
+        penjualan_tunai: penjualanTunaiBaru,
+        penjualan_non_tunai: penjualanNonTunaiBaru
+      });
     }
   }
 
@@ -261,13 +391,12 @@ app.post('/api/transaksi', verifikasiToken, (req, res) => {
 // GET /api/transaksi - Ambil riwayat transaksi
 app.get('/api/transaksi', verifikasiToken, (req, res) => {
   const cabangId = req.kasir.peran !== 'admin' ? req.kasir.cabang_id : null;
-  
+
   let transaksi = basisData.ambilSemua('transaksi');
   if (cabangId) {
     transaksi = transaksi.filter(t => t.cabang_id === cabangId);
   }
 
-  // Tambahkan detail nama kasir dan nama cabang
   const detailTransaksi = transaksi.map(t => {
     const kas = basisData.ambilBerdasarkanId('kasir', t.kasir_id);
     const cab = basisData.ambilBerdasarkanId('cabang', t.cabang_id);
@@ -278,7 +407,6 @@ app.get('/api/transaksi', verifikasiToken, (req, res) => {
     };
   });
 
-  // Urutkan transaksi terbaru di atas
   detailTransaksi.sort((a, b) => new Date(b.dibuat_pada) - new Date(a.dibuat_pada));
 
   return res.json({ sukses: true, data: detailTransaksi });
@@ -286,6 +414,9 @@ app.get('/api/transaksi', verifikasiToken, (req, res) => {
 
 // GET /api/transaksi/:id - Detail 1 transaksi
 app.get('/api/transaksi/:id', verifikasiToken, (req, res) => {
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID tidak valid." });
+  }
   const transaksi = basisData.ambilBerdasarkanId('transaksi', req.params.id);
   if (!transaksi) {
     return res.status(404).json({ sukses: false, pesan: "Transaksi tidak ditemukan." });
@@ -297,9 +428,12 @@ app.get('/api/transaksi/:id', verifikasiToken, (req, res) => {
     return {
       ...i,
       nama_barang: barang ? barang.nama_barang : "Barang Tidak Dikenal",
-      url_gambar: barang ? barang.url_gambar : "📦"
+      url_gambar: barang ? barang.url_gambar : "inventory_2"
     };
   });
+
+  // Sertakan data pembayaran dari tabel terpisah
+  const dataPembayaran = basisData.cariSatu('pembayaran', p => p.transaksi_id === transaksi.id);
 
   const kasir = basisData.ambilBerdasarkanId('kasir', transaksi.kasir_id);
   const cabang = basisData.ambilBerdasarkanId('cabang', transaksi.cabang_id);
@@ -310,32 +444,33 @@ app.get('/api/transaksi/:id', verifikasiToken, (req, res) => {
       ...transaksi,
       nama_kasir: kasir ? kasir.nama_lengkap : "Kasir",
       nama_cabang: cabang ? cabang.nama_cabang : "Cabang",
-      items: itemsDenganNama
+      items: itemsDenganNama,
+      pembayaran: dataPembayaran || null
     }
   });
 });
 
-// POST /api/transaksi/sinkronisasi - Sinkronisasi antrean transaksi offline ke online SQL
+// POST /api/transaksi/sinkronisasi - Sinkronisasi antrean offline ke online SQL
 app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
   const { antrean } = req.body;
 
-  if (!antrean || !antrean.length) {
+  if (!antrean || !Array.isArray(antrean) || antrean.length === 0) {
     return res.status(400).json({ sukses: false, pesan: "Tidak ada transaksi offline untuk disinkronisasi." });
   }
 
   const hasilSync = [];
 
   antrean.forEach(txOff => {
-    // Cek apakah transaksi ini sudah pernah disinkronisasi berdasarkan id_offline
-    const transaksiSudahAda = basisData.cariSatu('transaksi', t => t.kode_transaksi === txOff.id_offline || t.kode_transaksi.includes(txOff.id_offline));
+    const transaksiSudahAda = basisData.cariSatu('transaksi', t =>
+      t.kode_transaksi === txOff.id_offline || t.kode_transaksi.includes(txOff.id_offline)
+    );
     if (transaksiSudahAda) {
       hasilSync.push({ id_offline: txOff.id_offline, sukses: true, pesan: "Sudah pernah disinkronisasi sebelumnya." });
       return;
     }
 
-    // Pindahkan ke basis data transaksi SQL
     const transaksiBaru = basisData.tambah('transaksi', {
-      kode_transaksi: txOff.id_offline, // Simpan id_offline sebagai kode transaksi
+      kode_transaksi: txOff.id_offline,
       cabang_id: txOff.cabang_id,
       kasir_id: txOff.kasir_id,
       shift_id: txOff.shift_id,
@@ -345,11 +480,22 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
       metode_pembayaran: txOff.metode_pembayaran,
       jumlah_bayar: txOff.jumlah_bayar,
       jumlah_kembalian: txOff.jumlah_kembalian,
-      status_sinkronisasi: 1, // Berhasil online
+      status_sinkronisasi: 1,
       dibuat_pada: txOff.dibuat_pada
     });
 
-    // Simpan item-detail
+    // Tambah record pembayaran untuk transaksi yang disinkronisasi
+    basisData.tambah('pembayaran', {
+      transaksi_id: transaksiBaru.id,
+      metode: txOff.metode_pembayaran,
+      jumlah: txOff.total_belanja,
+      jumlah_bayar: ['tunai'].includes(txOff.metode_pembayaran) ? txOff.jumlah_bayar : txOff.total_belanja,
+      jumlah_kembalian: ['tunai'].includes(txOff.metode_pembayaran) ? txOff.jumlah_kembalian : 0,
+      status: "sukses",
+      referensi: txOff.metode_pembayaran !== 'tunai' ? `REF-SYNC-${Date.now()}` : null,
+      dibuat_pada: txOff.dibuat_pada
+    });
+
     txOff.item.forEach(itm => {
       basisData.tambah('item_transaksi', {
         transaksi_id: transaksiBaru.id,
@@ -359,8 +505,9 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
         subtotal: itm.jumlah * itm.harga_satuan
       });
 
-      // Tambahkan angka terjual cabang untuk sinkronisasi offline
-      const recordStok = basisData.cariSatu('stok', s => s.cabang_id === txOff.cabang_id && s.barang_id === itm.barang_id);
+      const recordStok = basisData.cariSatu('stok', s =>
+        s.cabang_id === txOff.cabang_id && s.barang_id === itm.barang_id
+      );
       if (recordStok) {
         const totalTerjual = Number(recordStok.terjual || 0) + Number(itm.jumlah);
         basisData.perbarui('stok', recordStok.id, {
@@ -370,16 +517,20 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
       }
     });
 
-    // Perbarui total omzet shift jika ada
     if (txOff.shift_id) {
       const shift = basisData.ambilBerdasarkanId('shift_kasir', txOff.shift_id);
       if (shift) {
         const totalBaru = Number(shift.total_penjualan || 0) + Number(txOff.total_belanja);
-        basisData.perbarui('shift_kasir', txOff.shift_id, { total_penjualan: totalBaru });
+        const penjualanTunaiBaru = Number(shift.penjualan_tunai || 0) + (txOff.metode_pembayaran === 'tunai' ? Number(txOff.total_belanja) : 0);
+        const penjualanNonTunaiBaru = Number(shift.penjualan_non_tunai || 0) + (txOff.metode_pembayaran !== 'tunai' ? Number(txOff.total_belanja) : 0);
+        basisData.perbarui('shift_kasir', txOff.shift_id, {
+          total_penjualan: totalBaru,
+          penjualan_tunai: penjualanTunaiBaru,
+          penjualan_non_tunai: penjualanNonTunaiBaru
+        });
       }
     }
 
-    // Tambahkan antrean sinkronisasi log di NoSQL
     basisData.tambah('antrean_sinkronisasi', {
       cabang_id: txOff.cabang_id,
       tipe: "transaksi",
@@ -392,10 +543,11 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
     hasilSync.push({ id_offline: txOff.id_offline, sukses: true, database_id: transaksiBaru.id });
   });
 
-  // Bersihkan transaksi offline dari NoSQL antrean lokal yang sudah disinkronisasi
+  // Bersihkan antrean offline NoSQL yang sudah disinkronisasi
   const idOfflines = antrean.map(a => a.id_offline);
-  const transaksiLokal = basisData.ambilSemua('transaksi_offline');
-  basisData.data.transaksi_offline = transaksiLokal.filter(t => !idOfflines.includes(t.id_offline));
+  basisData.data.transaksi_offline = basisData.data.transaksi_offline.filter(
+    t => !idOfflines.includes(t.id_offline)
+  );
   basisData.simpanKeFile();
 
   return res.json({
@@ -413,19 +565,15 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
 // GET /api/shift/daftar - Ambil daftar shift
 app.get('/api/shift/daftar', verifikasiToken, (req, res) => {
   const cabangId = req.kasir.peran !== 'admin' ? req.kasir.cabang_id : null;
-  
+
   let shift = basisData.ambilSemua('shift_kasir');
   if (cabangId) {
     shift = shift.filter(s => s.cabang_id === cabangId);
   }
 
-  // Gabungkan data kasir
   const dataShiftLengkap = shift.map(s => {
     const kas = basisData.ambilBerdasarkanId('kasir', s.kasir_id);
-    return {
-      ...s,
-      nama_kasir: kas ? kas.nama_lengkap : "Kasir"
-    };
+    return { ...s, nama_kasir: kas ? kas.nama_lengkap : "Kasir" };
   });
 
   dataShiftLengkap.sort((a, b) => new Date(b.dibuka_pada) - new Date(a.dibuka_pada));
@@ -437,20 +585,20 @@ app.get('/api/shift/daftar', verifikasiToken, (req, res) => {
 app.post('/api/shift/buka', verifikasiToken, (req, res) => {
   const { modal_awal } = req.body;
 
-  if (modal_awal === undefined || modal_awal === null) {
-    return res.status(400).json({ sukses: false, pesan: "Modal awal wajib ditentukan untuk membuka shift." });
+  if (!Validator.angka(modal_awal, 0, 99999999)) {
+    return res.status(400).json({ sukses: false, pesan: "Modal awal tidak valid. Harus angka non-negatif." });
   }
 
   const cabangId = req.kasir.cabang_id;
   const kasirId = req.kasir.id;
 
-  // Cek apakah kasir ini memiliki shift yang masih 'buka'
+  // Cek shift aktif
   const shiftAktif = basisData.cariSatu('shift_kasir', s => s.kasir_id === kasirId && s.status === 'buka');
   if (shiftAktif) {
-    return res.status(400).json({ 
-      sukses: false, 
+    return res.status(400).json({
+      sukses: false,
       pesan: "Anda masih memiliki shift yang belum ditutup. Tutup shift lama terlebih dahulu.",
-      data: shiftAktif 
+      data: shiftAktif
     });
   }
 
@@ -462,6 +610,8 @@ app.post('/api/shift/buka', verifikasiToken, (req, res) => {
     modal_awal: Number(modal_awal),
     kas_akhir: 0,
     total_penjualan: 0,
+    penjualan_tunai: 0,       // BARU: tracking penjualan tunai
+    penjualan_non_tunai: 0,   // BARU: tracking penjualan non-tunai
     status: "buka",
     catatan: ""
   });
@@ -477,8 +627,12 @@ app.post('/api/shift/buka', verifikasiToken, (req, res) => {
 app.put('/api/shift/:id/tutup', verifikasiToken, (req, res) => {
   const { kas_akhir, catatan } = req.body;
 
-  if (kas_akhir === undefined || kas_akhir === null) {
-    return res.status(400).json({ sukses: false, pesan: "Jumlah kas akhir wajib diisi untuk menutup shift." });
+  if (!Validator.angka(kas_akhir, 0, 99999999)) {
+    return res.status(400).json({ sukses: false, pesan: "Jumlah kas akhir tidak valid." });
+  }
+
+  if (!Validator.angka(req.params.id, 1)) {
+    return res.status(400).json({ sukses: false, pesan: "ID shift tidak valid." });
   }
 
   const shift = basisData.ambilBerdasarkanId('shift_kasir', req.params.id);
@@ -486,23 +640,29 @@ app.put('/api/shift/:id/tutup', verifikasiToken, (req, res) => {
     return res.status(404).json({ sukses: false, pesan: "Shift aktif tidak ditemukan atau sudah ditutup." });
   }
 
-  // Hitung ekspektasi kas: modal_awal + total_penjualan (asumsi tunai, namun untuk rekapitulasi hitung selisihnya)
-  const ekspektasiKas = Number(shift.modal_awal) + Number(shift.total_penjualan);
+  // Ekspektasi kas hanya dari penjualan tunai, bukan total semua metode
+  // Penjualan QRIS/debit/kredit masuk ke payment gateway, bukan laci kas
+  const penjualanTunai = Number(shift.penjualan_tunai || 0);
+  const ekspektasiKas = Number(shift.modal_awal) + penjualanTunai;
   const selisih = Number(kas_akhir) - ekspektasiKas;
+
+  const catatanFinal = catatan
+    ? Validator.bersihkan(catatan)
+    : `Tutup shift. Penjualan tunai: Rp ${penjualanTunai.toLocaleString('id-ID')}. Ekspektasi kas: Rp ${ekspektasiKas.toLocaleString('id-ID')}. Selisih: Rp ${selisih.toLocaleString('id-ID')}`;
 
   const shiftDitutup = basisData.perbarui('shift_kasir', req.params.id, {
     ditutup_pada: new Date().toISOString(),
     kas_akhir: Number(kas_akhir),
     status: "tutup",
-    catatan: catatan || `Tutup shift. Selisih kas: Rp ${selisih.toLocaleString('id-ID')}`
+    catatan: catatanFinal
   });
 
-  // Tambahkan log audit selisih kas untuk mencegah kebocoran
+  // Audit log rekonsiliasi kas
   basisData.tambah('log_perangkat', {
     cabang_id: shift.cabang_id,
     kasir_id: shift.kasir_id,
     tipe_kejadian: "close_shift_audit",
-    pesan: `Shift ID ${shift.id} ditutup. Ekspektasi: Rp ${ekspektasiKas}, Aktual: Rp ${kas_akhir}. Selisih: Rp ${selisih}`,
+    pesan: `Shift ID ${shift.id} ditutup. Modal: Rp ${shift.modal_awal} | Tunai: Rp ${penjualanTunai} | Non-tunai: Rp ${shift.penjualan_non_tunai || 0} | Ekspektasi kas: Rp ${ekspektasiKas} | Aktual: Rp ${kas_akhir} | Selisih: Rp ${selisih}`,
     timestamp: new Date().toISOString()
   });
 
@@ -510,6 +670,9 @@ app.put('/api/shift/:id/tutup', verifikasiToken, (req, res) => {
     sukses: true,
     pesan: "Shift berhasil ditutup dan direkonsiliasi.",
     selisih_kas: selisih,
+    penjualan_tunai: penjualanTunai,
+    penjualan_non_tunai: Number(shift.penjualan_non_tunai || 0),
+    ekspektasi_kas: ekspektasiKas,
     data: shiftDitutup
   });
 });
@@ -519,7 +682,8 @@ app.put('/api/shift/:id/tutup', verifikasiToken, (req, res) => {
 // 4. ANALISIS LAPORAN
 
 
-// GET /api/laporan/omzet - Grafik total penjualan harian (untuk visual trend)
+// GET /api/laporan/omzet - Grafik total penjualan harian
+// Gunakan tanggal aktual YYYY-MM-DD, bukan nama hari
 app.get('/api/laporan/omzet', verifikasiToken, (req, res) => {
   const cabangId = req.kasir.peran !== 'admin' ? req.kasir.cabang_id : null;
   let transaksi = basisData.ambilSemua('transaksi');
@@ -528,27 +692,33 @@ app.get('/api/laporan/omzet', verifikasiToken, (req, res) => {
     transaksi = transaksi.filter(t => t.cabang_id === cabangId);
   }
 
-  // Hitung total belanja per hari (7 hari terakhir)
+  // Buat map 7 hari terakhir berdasarkan TANGGAL AKTUAL, bukan nama hari
   const rekapHarian = {};
-  const daftarHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const daftarHari = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
-  // Inisialisasi 7 hari terakhir
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const namaHari = daftarHari[d.getDay()];
-    rekapHarian[namaHari] = { omzet: 0, cost: 0, nama_hari: namaHari };
+    const tanggal = d.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+    const labelHari = daftarHari[d.getDay()];
+    const labelTanggal = `${d.getDate()}/${d.getMonth() + 1}`;
+
+    rekapHarian[tanggal] = {
+      tanggal,
+      label: `${labelHari} ${labelTanggal}`,
+      omzet: 0,
+      cost: 0,
+      jumlah_transaksi: 0
+    };
   }
 
+  // Kelompokkan transaksi per tanggal aktual
   transaksi.forEach(t => {
-    const tgl = new Date(t.dibuat_pada);
-    const namaHari = daftarHari[tgl.getDay()];
-    
-    // Cek apakah hari ini ada dalam 7 hari terakhir
-    if (rekapHarian[namaHari]) {
-      rekapHarian[namaHari].omzet += Number(t.total_belanja);
-      // Simulasikan harga modal/pokok 50% untuk visualisasi HPP
-      rekapHarian[namaHari].cost += Number(t.total_belanja) * 0.55;
+    const tanggalTransaksi = new Date(t.dibuat_pada).toISOString().split('T')[0];
+    if (rekapHarian[tanggalTransaksi]) {
+      rekapHarian[tanggalTransaksi].omzet += Number(t.total_belanja);
+      rekapHarian[tanggalTransaksi].cost += Number(t.total_belanja) * 0.55;
+      rekapHarian[tanggalTransaksi].jumlah_transaksi += 1;
     }
   });
 

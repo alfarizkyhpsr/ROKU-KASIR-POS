@@ -5,7 +5,7 @@ const KUNCI_RAHASIA = process.env.JWT_SECRET || "KASIR_UI_KUNCI_RAHASIA_SUPER_AM
 
 function verifikasiToken(req, res, next) {
   const authorizationHeader = req.headers['authorization'];
-  
+
   if (!authorizationHeader) {
     return res.status(401).json({
       sukses: false,
@@ -25,13 +25,27 @@ function verifikasiToken(req, res, next) {
 
   try {
     const terdekripsi = jwt.verify(token, KUNCI_RAHASIA);
-    
+
     // Cari kasir di basis data untuk memastikan akun masih ada & aktif
     const akunKasir = basisData.ambilBerdasarkanId('kasir', terdekripsi.kasirId);
     if (!akunKasir || !akunKasir.is_aktif) {
       return res.status(403).json({
         sukses: false,
         pesan: "Akun kasir tidak ditemukan atau sudah dinonaktifkan."
+      });
+    }
+
+    // Cegah token yang sudah di-logout dipakai kembali
+    const tokenId = token.substring(token.length - 20);
+    const sesiMasihAktif = basisData.cariSatu(
+      'sesi_aktif',
+      s => s.token_id === tokenId && s.kasir_id === akunKasir.id
+    );
+
+    if (!sesiMasihAktif) {
+      return res.status(401).json({
+        sukses: false,
+        pesan: "Sesi tidak ditemukan atau sudah berakhir. Silakan login kembali."
       });
     }
 

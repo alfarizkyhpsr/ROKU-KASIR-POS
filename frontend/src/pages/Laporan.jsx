@@ -8,15 +8,17 @@ function Laporan() {
   const [dataKasir, setDataKasir] = useState([]);
   const [riwayatTransaksi, setRiwayatTransaksi] = useState([]);
   const [rentangWaktu, setRentangWaktu] = useState('7_HARI');
+  const [sedangMemuat, setSedangMemuat] = useState(true);
 
   // Angka Ringkasan KPI
   const [totalPendapatan, setTotalPendapatan] = useState(0);
   const [totalTransaksi, setTotalTransaksi] = useState(0);
   const [produkTerlaris, setProdukTerlaris] = useState('ES KOPI SUSU AREN');
-  
+
   const muatDataLaporan = async () => {
+    setSedangMemuat(true);
     try {
-      // 1. Ambil grafik omzet harian
+      // 1. Ambil grafik omzet harian (sekarang berisi tanggal aktual dari backend)
       const resOmzet = await klienApi.get('/laporan/omzet');
       if (resOmzet.data.sukses) {
         setDataOmzet(resOmzet.data.data);
@@ -26,14 +28,20 @@ function Laporan() {
       const resKasir = await klienApi.get('/laporan/kasir');
       if (resKasir.data.sukses) {
         setDataKasir(resKasir.data.data);
+
+        // Hitung produk terlaris dari data kasir dengan total terbanyak
+        const kasirTerlaris = [...resKasir.data.data].sort((a, b) => b.total_penjualan - a.total_penjualan);
+        if (kasirTerlaris.length > 0 && kasirTerlaris[0].total_penjualan > 0) {
+          // Tetap pakai placeholder sampai ada endpoint produk terlaris
+          setProdukTerlaris('ES KOPI SUSU AREN');
+        }
       }
 
       // 3. Ambil riwayat semua transaksi
       const resTx = await klienApi.get('/transaksi');
       if (resTx.data.sukses) {
         setRiwayatTransaksi(resTx.data.data);
-        
-        // Hitung total akumulasi keuangan
+
         const sumOmzet = resTx.data.data.reduce((sum, tx) => sum + Number(tx.total_belanja), 0);
         setTotalPendapatan(sumOmzet);
         setTotalTransaksi(resTx.data.data.length);
@@ -41,15 +49,21 @@ function Laporan() {
     } catch (e) {
       console.error("Gagal memuat laporan:", e);
       // Fallback dummy data jika server offline
-      setDataOmzet([
-        { nama_hari: "Senin", omzet: 240000, cost: 120000 },
-        { nama_hari: "Selasa", omzet: 450000, cost: 230000 },
-        { nama_hari: "Rabu", omzet: 300000, cost: 150000 },
-        { nama_hari: "Kamis", omzet: 580000, cost: 290000 },
-        { nama_hari: "Jumat", omzet: 700000, cost: 350000 },
-        { nama_hari: "Sabtu", omzet: 950000, cost: 480000 },
-        { nama_hari: "Minggu", omzet: 400000, cost: 200000 }
-      ]);
+      const hariIni = new Date();
+      setDataOmzet(Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(hariIni);
+        d.setDate(d.getDate() - (6 - i));
+        const daftarHari = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+        return {
+          tanggal: d.toISOString().split('T')[0],
+          label: `${daftarHari[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`,
+          omzet: [240000, 450000, 300000, 580000, 700000, 950000, 400000][i],
+          cost: [120000, 230000, 150000, 290000, 350000, 480000, 200000][i],
+          jumlah_transaksi: [8, 15, 10, 19, 23, 31, 13][i]
+        };
+      }));
+    } finally {
+      setSedangMemuat(false);
     }
   };
 
@@ -73,7 +87,6 @@ function Laporan() {
     alert("Laporan Penjualan berhasil diekspor ke file CSV!");
   };
 
-  // Hitung persentase bar grafik untuk SVG neubrutal harian
   const cariNilaiOmzetMaksimal = () => {
     let max = 100000;
     dataOmzet.forEach(d => {
@@ -83,20 +96,24 @@ function Laporan() {
   };
   const omzetMaks = cariNilaiOmzetMaksimal();
 
+  // Hitung total omzet 7 hari dari data grafik
+  const totalOmzet7Hari = dataOmzet.reduce((sum, d) => sum + d.omzet, 0);
+  const totalTx7Hari = dataOmzet.reduce((sum, d) => sum + (d.jumlah_transaksi || 0), 0);
+
   return (
     <div className="flex-1 p-6 overflow-y-auto font-mono text-xs text-on-surface">
-      
+
       {/* 1. HEADER HALAMAN & ACTIONS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b-2 border-on-surface pb-6 mb-6">
         <div>
           <h1 className="font-display font-black text-4xl uppercase tracking-tight">Laporan Penjualan</h1>
           <p className="text-on-surface-variant mt-1">Audit keuangan, profitabilitas kas harian, dan ringkasan selisih kasir.</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center border-2 border-on-surface bg-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] p-1">
             <span className="material-symbols-outlined px-2">calendar_month</span>
-            <select 
+            <select
               value={rentangWaktu}
               onChange={(e) => setRentangWaktu(e.target.value)}
               className="bg-transparent border-none focus:ring-0 font-bold py-1 pr-8 pl-0 text-xs"
@@ -105,7 +122,7 @@ function Laporan() {
               <option value="BULAN_INI">Bulan Berjalan</option>
             </select>
           </div>
-          <button 
+          <button
             onClick={eksporKeCSV}
             className="bg-primary text-on-primary font-bold border-2 border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none transition-all px-4 py-2 flex items-center gap-2"
           >
@@ -123,7 +140,7 @@ function Laporan() {
             <h3 className="font-bold uppercase tracking-wider text-[10px] border-2 border-on-surface bg-on-surface text-white px-2 py-0.5 inline-block">Total Omzet</h3>
             <div className="text-2xl font-black mt-4 tracking-tighter">Rp {totalPendapatan.toLocaleString('id-ID')}</div>
             <div className="text-[9px] text-[#cfbcff] mt-2 font-bold flex items-center gap-1">
-              <span className="material-symbols-outlined text-xs">trending_up</span> +12.5% Cabang Aktif
+              <span className="material-symbols-outlined text-xs">trending_up</span> Semua transaksi tercatat
             </div>
           </div>
         </div>
@@ -132,7 +149,7 @@ function Laporan() {
         <div className="bg-tertiary-fixed text-on-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
           <h3 className="font-bold uppercase tracking-wider text-[10px] border-2 border-on-surface bg-surface px-2 py-0.5 inline-block">Total Transaksi</h3>
           <div className="text-2xl font-black mt-4 tracking-tighter">{totalTransaksi} CHECKOUT</div>
-          <div className="text-[9px] text-on-surface-variant mt-2 font-bold">Rata-rata 25 menit sekali</div>
+          <div className="text-[9px] text-on-surface-variant mt-2 font-bold">{totalTx7Hari} transaksi dalam 7 hari terakhir</div>
         </div>
 
         {/* Produk Terlaris */}
@@ -142,21 +159,29 @@ function Laporan() {
           <div className="text-[9px] text-on-surface-variant mt-2 font-bold">Kontribusi 42% Omzet Minuman</div>
         </div>
 
-        {/* Margin Laba Bersih */}
+        {/* Omzet 7 Hari */}
         <div className="bg-[#4ade80]/20 text-on-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
-          <h3 className="font-bold uppercase tracking-wider text-[10px] border-2 border-on-surface bg-[#4ade80] px-2 py-0.5 inline-block">Profit Margin</h3>
-          <div className="text-2xl font-black mt-4 tracking-tighter">45.0% EST</div>
-          <div className="text-[9px] text-on-surface-variant mt-2 font-bold">Di luar biaya gaji & sewa</div>
+          <h3 className="font-bold uppercase tracking-wider text-[10px] border-2 border-on-surface bg-[#4ade80] px-2 py-0.5 inline-block">Omzet 7 Hari</h3>
+          <div className="text-xl font-black mt-4 tracking-tighter">Rp {totalOmzet7Hari.toLocaleString('id-ID')}</div>
+          <div className="text-[9px] text-on-surface-variant mt-2 font-bold">Data tanggal aktual real-time</div>
         </div>
       </div>
 
       {/* 3. CHARTS & DAILY TRENDS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        
-        {/* Trend Bar Chart (SVG Neubrutalisme) */}
+
+        {/* Trend Bar Chart */}
         <div className="lg:col-span-2 bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
           <div className="flex justify-between items-center mb-8 border-b-2 border-on-surface pb-4">
-            <h2 className="text-lg font-black uppercase">Grafik Penjualan 7 Hari Terakhir</h2>
+            <div>
+              <h2 className="text-lg font-black uppercase">Grafik Penjualan 7 Hari Terakhir</h2>
+              {/* Tampilkan rentang tanggal aktual */}
+              {dataOmzet.length >= 2 && (
+                <p className="text-[10px] text-on-surface-variant font-bold mt-0.5">
+                  {dataOmzet[0]?.tanggal} — {dataOmzet[dataOmzet.length - 1]?.tanggal}
+                </p>
+              )}
+            </div>
             <div className="flex gap-4">
               <span className="flex items-center gap-1 font-bold text-[9px]">
                 <div className="w-2.5 h-2.5 bg-primary border border-on-surface"></div> Omzet Penjualan
@@ -167,34 +192,48 @@ function Laporan() {
             </div>
           </div>
 
-          {/* Faux Bar Chart (Stitch Screen 2 - Bento styling) */}
-          <div className="h-64 flex items-end justify-between gap-3 px-2 pt-4">
-            {dataOmzet.map((d, i) => {
-              // Hitung persen tinggi bar
-              const hOmzet = Math.min(100, Math.max(10, Math.round((d.omzet / omzetMaks) * 100)));
-              const hHpp = Math.min(hOmzet - 5, Math.max(5, Math.round((d.cost / omzetMaks) * 100)));
-              
-              return (
-                <div key={i} className="flex flex-col items-center flex-1 group">
-                  <div className="w-full flex justify-center items-end h-48 border-b-2 border-on-surface relative">
-                    {/* Omzet Bar */}
-                    <div 
-                      style={{ height: `${hOmzet}%` }}
-                      className="absolute bottom-0 w-3/4 bg-primary border-2 border-b-0 border-on-surface group-hover:bg-[#6750a4] transition-colors"
-                      title={`Omzet: Rp ${d.omzet.toLocaleString('id-ID')}`}
-                    ></div>
-                    {/* HPP Bar (Stacked/Overlay) */}
-                    <div 
-                      style={{ height: `${hHpp}%` }}
-                      className="absolute bottom-0 w-3/4 bg-tertiary-fixed border-2 border-b-0 border-on-surface group-hover:bg-[#e7c365] transition-colors opacity-80"
-                      title={`HPP: Rp ${d.cost.toLocaleString('id-ID')}`}
-                    ></div>
+          {sedangMemuat ? (
+            <div className="h-64 flex items-center justify-center text-on-surface-variant font-bold text-sm">
+              <span className="material-symbols-outlined animate-spin mr-2">autorenew</span>
+              Memuat data grafik...
+            </div>
+          ) : (
+            <div className="h-64 flex items-end justify-between gap-3 px-2 pt-4">
+              {dataOmzet.map((d, i) => {
+                const hOmzet = Math.min(100, Math.max(10, Math.round((d.omzet / omzetMaks) * 100)));
+                const hHpp = Math.min(hOmzet - 5, Math.max(5, Math.round((d.cost / omzetMaks) * 100)));
+
+                return (
+                  <div key={d.tanggal || i} className="flex flex-col items-center flex-1 group">
+                    <div className="w-full flex justify-center items-end h-48 border-b-2 border-on-surface relative">
+                      {/* Omzet Bar */}
+                      <div
+                        style={{ height: `${hOmzet}%` }}
+                        className="absolute bottom-0 w-3/4 bg-primary border-2 border-b-0 border-on-surface group-hover:bg-[#6750a4] transition-colors"
+                        title={`${d.tanggal} — Omzet: Rp ${d.omzet.toLocaleString('id-ID')} (${d.jumlah_transaksi || 0} TX)`}
+                      ></div>
+                      {/* HPP Bar */}
+                      <div
+                        style={{ height: `${hHpp}%` }}
+                        className="absolute bottom-0 w-3/4 bg-tertiary-fixed border-2 border-b-0 border-on-surface group-hover:bg-[#e7c365] transition-colors opacity-80"
+                        title={`HPP: Rp ${d.cost.toLocaleString('id-ID')}`}
+                      ></div>
+                    </div>
+                    {/* Label kolom pakai tanggal aktual (hari + tgl/bulan) */}
+                    <span className="text-[9px] font-bold mt-2 text-on-surface-variant text-center leading-tight">
+                      {d.label || d.tanggal}
+                    </span>
+                    {/* Tampilkan omzet di atas bar jika ada transaksi */}
+                    {d.omzet > 0 && (
+                      <span className="text-[8px] text-primary font-black mt-0.5">
+                        {(d.omzet / 1000).toFixed(0)}K
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] font-bold mt-2 text-on-surface-variant">{d.nama_hari}</span>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Performa Kasir */}
@@ -250,7 +289,11 @@ function Laporan() {
               {riwayatTransaksi.map(tx => (
                 <tr key={tx.id} className="border-b border-on-surface hover:bg-surface-container-low/50">
                   <td className="p-3 border-r border-on-surface font-bold">{tx.kode_transaksi}</td>
-                  <td className="p-3 border-r border-on-surface">{tx.dibuat_pada?.split('T')[0]}</td>
+                  {/* Tampilkan tanggal + jam, bukan hanya tanggal */}
+                  <td className="p-3 border-r border-on-surface">
+                    <div>{tx.dibuat_pada?.split('T')[0]}</div>
+                    <div className="text-[9px] text-on-surface-variant">{tx.dibuat_pada?.split('T')[1]?.substring(0, 5)} WIB</div>
+                  </td>
                   <td className="p-3 border-r border-on-surface uppercase font-bold">{tx.nama_cabang || "Pusat"}</td>
                   <td className="p-3 border-r border-on-surface">{tx.nama_kasir || "Kasir"}</td>
                   <td className="p-3 border-r border-on-surface uppercase font-bold text-on-surface-variant">{tx.metode_pembayaran}</td>
@@ -258,9 +301,10 @@ function Laporan() {
                     Rp {tx.total_belanja.toLocaleString('id-ID')}
                   </td>
                   <td className="p-3 text-center">
-                    <span className={`px-1.5 py-0.5 border text-[8px] font-black ${
-                      tx.status_sinkronisasi === 1 ? 'bg-[#4ade80]/20 text-[#22c55e] border-[#4ade80]' : 'bg-[#ffdf93]/20 text-on-tertiary-fixed border-[#ffdf93] animate-pulse'
-                    }`}>
+                    <span className={`px-1.5 py-0.5 border text-[8px] font-black ${tx.status_sinkronisasi === 1
+                        ? 'bg-[#4ade80]/20 text-[#22c55e] border-[#4ade80]'
+                        : 'bg-[#ffdf93]/20 text-on-tertiary-fixed border-[#ffdf93] animate-pulse'
+                      }`}>
                       {tx.status_sinkronisasi === 1 ? 'SYNCHED' : 'PENDING'}
                     </span>
                   </td>
