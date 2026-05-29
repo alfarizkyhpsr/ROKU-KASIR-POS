@@ -320,9 +320,9 @@ function Kasir() {
       </aside>
 
 
-      {/* ======================================================== */}
+      
       {/* 4. MODAL PEMBAYARAN (Stitch Screen 5 - Payment Modal) */}
-      {/* ======================================================== */}
+      
       {tampilkanModalBayar && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-lg p-6 relative font-mono">
@@ -401,9 +401,9 @@ function Kasir() {
       )}
 
 
-      {/* ======================================================== */}
+      
       {/* 5. MODAL STRUK SUKSES (Stitch Screen 7 - Success Modal) */}
-      {/* ======================================================== */}
+      
       {tampilkanModalSukses && transaksiTerakhir && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono text-xs">

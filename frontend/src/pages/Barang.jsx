@@ -373,9 +373,9 @@ function Barang() {
         </div>
       </div>
 
-      {/* ======================================================== */}
+
       {/* 3. MODAL TAMBAH/EDIT BARANG (CRUD MODAL) */}
-      {/* ======================================================== */}
+      
       {tampilkanModalForm && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <form onSubmit={simpanForm} className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-md p-6 relative font-mono">
@@ -526,9 +526,9 @@ function Barang() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* 4. MODAL DETAIL TARGET PER CABANG */}
-      {/* ======================================================== */}
+      
       {tampilkanModalStok && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-md p-6 relative font-mono">
@@ -572,9 +572,8 @@ function Barang() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL KONFIRMASI HAPUS BARANG */}
-      {/* ======================================================== */}
+      {/* 5. MODAL KONFIRMASI HAPUS BARANG */}
+
       {modalHapusBarang.tampil && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-error shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono text-center">
@@ -600,9 +599,9 @@ function Barang() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MODAL ATUR TARGET HARIAN */}
-      {/* ======================================================== */}
+
+      {/* 6. MODAL ATUR TARGET HARIAN */}
+
       {modalTarget.tampil && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono">

@@ -125,9 +125,9 @@ function Pengaturan() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
-        {/* ========================================== */}
+        
         {/* PANEL A: MANAJEMEN SHIFT KASIR (REKONSILIASI) */}
-        {/* ========================================== */}
+        
         <section className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
           <div className="flex items-center gap-2 font-black border-b-2 border-on-surface pb-3 mb-6">
             <span className="material-symbols-outlined text-base">account_balance_wallet</span>
@@ -254,9 +254,9 @@ function Pengaturan() {
           )}
         </section>
 
-        {/* ========================================== */}
+        
         {/* PANEL B: FIRESTORE OFFLINE QUEUE (SINKRONISASI) */}
-        {/* ========================================== */}
+        
         <section className="space-y-6">
           
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">

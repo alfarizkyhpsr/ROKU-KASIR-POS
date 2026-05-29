@@ -326,9 +326,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL TAMBAH CABANG */}
-      {/* ======================================================== */}
+      
       {modalCabang && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-md p-6 relative font-mono">
@@ -385,9 +385,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL TAMBAH KASIR/KARYAWAN */}
-      {/* ======================================================== */}
+      
       {modalKasir && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-lg p-6 relative font-mono">
@@ -490,9 +490,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL KONFIRMASI HAPUS KASIR */}
-      {/* ======================================================== */}
+      
       {modalKonfirmasiHapus.tampil && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-error shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono text-center">
@@ -524,9 +524,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL KONFIRMASI HAPUS CABANG */}
-      {/* ======================================================== */}
+      
       {modalKonfirmasiHapusCabang.tampil && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-error shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono text-center">
@@ -558,9 +558,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL EDIT CABANG */}
-      {/* ======================================================== */}
+      
       {modalEditCabang && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-md p-6 relative font-mono">
@@ -614,9 +614,9 @@ function ManajemenSDM() {
         </div>
       )}
 
-      {/* ======================================================== */}
+      
       {/* MODAL EDIT KASIR/KARYAWAN */}
-      {/* ======================================================== */}
+      
       {modalEditKasir && (
         <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
           <div className="bg-surface border-4 border-on-surface shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-lg p-6 relative font-mono">

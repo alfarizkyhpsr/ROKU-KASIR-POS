@@ -9,9 +9,9 @@ app.use(express.json());
 
 const PORT = 5002;
 
-// ==========================================
+
 // 1. CRUD BARANG (LAYANAN PRODUK)
-// ==========================================
+
 
 // GET /api/barang - Daftar semua barang
 app.get('/api/barang', verifikasiToken, (req, res) => {
@@ -134,9 +134,8 @@ app.put('/api/target/:id', verifikasiToken, hanyaManajerAtauAdmin, (req, res) =>
 });
 
 
-// ==========================================
 // 2. TRANSAKSI POS & SINKRONISASI
-// ==========================================
+
 
 // POST /api/transaksi - Buat transaksi POS baru
 app.post('/api/transaksi', verifikasiToken, (req, res) => {
@@ -407,9 +406,9 @@ app.post('/api/transaksi/sinkronisasi', verifikasiToken, (req, res) => {
 });
 
 
-// ==========================================
+
 // 3. MANAJEMEN SHIFT KASIR
-// ==========================================
+
 
 // GET /api/shift/daftar - Ambil daftar shift
 app.get('/api/shift/daftar', verifikasiToken, (req, res) => {
@@ -516,9 +515,9 @@ app.put('/api/shift/:id/tutup', verifikasiToken, (req, res) => {
 });
 
 
-// ==========================================
+
 // 4. ANALISIS LAPORAN
-// ==========================================
+
 
 // GET /api/laporan/omzet - Grafik total penjualan harian (untuk visual trend)
 app.get('/api/laporan/omzet', verifikasiToken, (req, res) => {
