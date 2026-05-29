@@ -1,0 +1,74 @@
+# ============================================================
+# .gitignore — TCC_Praktikum (Backend + Frontend)
+# ============================================================
+
+# ─── Node Modules ───────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ─── Environment & Secrets ──────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Database Live (JSON file, otomatis ter-generate ulang) ─
+backend/shared/basis_data_toko.json
+
+# ─── Frontend Build Output (Production) ─────────────────────
+frontend/dist/
+frontend/.vite/
+
+# ─── Log Files ──────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# ─── OS Files ───────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ─── Editor / IDE ───────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.bak
+
+# ─── Cache & Temp ───────────────────────────────────────────
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.vite/
+
+# ─── Test Coverage ──────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+
+# ─── Stitch / Design Resources ──────────────────────────────
+.stitch/
+stitch-exports/
+stitch_resources/
+*.stitch
+*.fig
+prd_extracted.txt
+
+# ─── Package Lock (pilih salah satu, konsisten) ─────────────
+# Uncomment baris di bawah ini jika tidak mau commit lockfile:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
