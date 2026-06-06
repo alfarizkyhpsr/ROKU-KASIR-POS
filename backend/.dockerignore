@@ -1,0 +1,21 @@
+# ============================================================
+# backend/.dockerignore
+# Build context: backend/ (untuk Service 2 dan 3)
+# ============================================================
+
+# Node modules — di-install ulang saat build
+node_modules
+
+# Env files — diisi via --set-env-vars di Cloud Run
+.env
+.env.*
+.env.gcp*
+
+# Database lokal NeDB — tidak dipakai di production GCP
+data
+*.db
+
+# File runtime lokal
+shared/basis_data_toko.json
+*.log
+.DS_Store

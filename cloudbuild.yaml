@@ -1,0 +1,116 @@
+# ============================================================
+# KASIR ROKU — Cloud Build CI/CD Pipeline (3 Services)
+# Sesuaikan PROJECT_ID, REGION, dan URL layanan
+# ============================================================
+
+substitutions:
+  _REGION: asia-southeast2
+  _AUTH_IMAGE: gcr.io/$PROJECT_ID/kasir-auth
+  _TRANSAKSI_IMAGE: gcr.io/$PROJECT_ID/kasir-transaksi
+  _FRONTEND_GATEWAY_IMAGE: gcr.io/$PROJECT_ID/kasir-frontend-gateway
+  _AUTH_SERVICE: kasir-auth
+  _TRANSAKSI_SERVICE: kasir-transaksi
+  _FRONTEND_GATEWAY_SERVICE: kasir-frontend-gateway
+
+steps:
+  # ── 1. Build layanan-auth (Service 2) ──────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-auth
+    args:
+      - build
+      - -f
+      - backend/layanan-auth/Dockerfile
+      - -t
+      - $_AUTH_IMAGE
+      - backend/
+    waitFor: ['-']
+
+  # ── 2. Build layanan-transaksi (Service 3) ─────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-transaksi
+    args:
+      - build
+      - -f
+      - backend/layanan-transaksi/Dockerfile
+      - -t
+      - $_TRANSAKSI_IMAGE
+      - backend/
+    waitFor: ['-']
+
+  # ── 3. Build Frontend & API Gateway (Service 1) ────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-frontend-gateway
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - $_FRONTEND_GATEWAY_IMAGE
+      - .
+    waitFor: ['-']
+
+  # ── 4. Push semua image ────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-auth
+    args: ['push', '$_AUTH_IMAGE']
+    waitFor: ['build-auth']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-transaksi
+    args: ['push', '$_TRANSAKSI_IMAGE']
+    waitFor: ['build-transaksi']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-frontend-gateway
+    args: ['push', '$_FRONTEND_GATEWAY_IMAGE']
+    waitFor: ['build-frontend-gateway']
+
+  # ── 5. Deploy ke Cloud Run ─────────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy-auth
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_AUTH_SERVICE
+      - --image=$_AUTH_IMAGE
+      - --region=$_REGION
+      - --platform=managed
+      - --allow-unauthenticated
+      - --add-cloudsql-instances=$_CLOUD_SQL_CONNECTION
+      - --set-env-vars=NODE_ENV=production,DB_USER=$$DB_USER,DB_PASSWORD=$$DB_PASSWORD,DB_NAME=kasir_roku,CLOUD_SQL_CONNECTION_NAME=$_CLOUD_SQL_CONNECTION,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,JWT_SECRET=$$JWT_SECRET,FIRESTORE_DATABASE_ID=default
+    waitFor: ['push-auth']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy-transaksi
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_TRANSAKSI_SERVICE
+      - --image=$_TRANSAKSI_IMAGE
+      - --region=$_REGION
+      - --platform=managed
+      - --allow-unauthenticated
+      - --add-cloudsql-instances=$_CLOUD_SQL_CONNECTION
+      - --set-env-vars=NODE_ENV=production,DB_USER=$$DB_USER,DB_PASSWORD=$$DB_PASSWORD,DB_NAME=kasir_roku,CLOUD_SQL_CONNECTION_NAME=$_CLOUD_SQL_CONNECTION,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,JWT_SECRET=$$JWT_SECRET,FIRESTORE_DATABASE_ID=default
+    waitFor: ['push-transaksi']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy-frontend-gateway
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_FRONTEND_GATEWAY_SERVICE
+      - --image=$_FRONTEND_GATEWAY_IMAGE
+      - --region=$_REGION
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-env-vars=NODE_ENV=production,AUTH_SERVICE_URL=$$AUTH_SERVICE_URL,TRANSAKSI_SERVICE_URL=$$TRANSAKSI_SERVICE_URL
+    waitFor: ['push-frontend-gateway']
+
+images:
+  - $_AUTH_IMAGE
+  - $_TRANSAKSI_IMAGE
+  - $_FRONTEND_GATEWAY_IMAGE

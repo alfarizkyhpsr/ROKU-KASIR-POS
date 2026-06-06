@@ -1,0 +1,35 @@
+# ============================================================
+# .dockerignore — root (untuk Service 1: frontend + gateway)
+# Build context: . (seluruh project)
+# ============================================================
+
+# Node modules — di-install ulang saat build
+node_modules
+**/node_modules
+
+# Env files — diisi via --set-env-vars di Cloud Run
+.env
+.env.*
+backend/.env.gcp*
+frontend/.env.gcp
+
+# Database lokal (NeDB) — tidak dipakai di production
+backend/data
+*.db
+
+# Frontend source tidak perlu di image final (sudah di-build di Stage 1)
+# Tapi kita PERLU folder frontend/ untuk build, jadi JANGAN exclude frontend/
+# Yang perlu di-exclude hanya hasil build lama
+frontend/dist
+frontend/.vite
+
+# File runtime yang tidak relevan
+backend/shared/basis_data_toko.json
+*.log
+.DS_Store
+.gemini
+
+# Script deploy lokal — tidak perlu masuk image
+deploy-final.ps1
+cleanup-gcp.ps1
+deploy-update.ps1

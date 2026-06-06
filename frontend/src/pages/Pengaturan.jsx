@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useTokoState } from '../store/toko_state';
 import klienApi from '../api/klien_api';
+import { useNotifikasi } from '../components/NotifikasiPopup';
 
 function Pengaturan() {
+  const { tambahNotifikasi } = useNotifikasi();
   const { 
     sesiKasir, 
     shiftAktif, 
@@ -28,11 +30,15 @@ function Pengaturan() {
     try {
       // Ambil log perangkat jika online
       if (apakahOnline) {
-        // Simulasikan atau tarik logs dari server
-        setLogsAktivitas([
-          { event_type: "login", message: "Kasir kasir01 berhasil masuk ke Stasiun 01", timestamp: new Date().toISOString() },
-          { event_type: "sync", message: "Sinkronisasi antrean NoSQL FIFO berhasil diselesaikan", timestamp: new Date().toISOString() }
-        ]);
+        const respons = await klienApi.get('/log');
+        if (respons.data && respons.data.sukses) {
+          // Map data backend ke format UI (tipe_kejadian -> event_type, pesan -> message)
+          setLogsAktivitas(respons.data.data.map(log => ({
+            event_type: log.tipe_kejadian,
+            message: log.pesan,
+            timestamp: log.timestamp
+          })));
+        }
       }
     } catch (e) {
       console.error(e);
@@ -55,7 +61,7 @@ function Pengaturan() {
   const tanganiBukaShift = async (e) => {
     e.preventDefault();
     if (!modalAwal || Number(modalAwal) < 0) {
-      alert("Modal awal tidak boleh kosong atau negatif.");
+      tambahNotifikasi('peringatan', 'Modal awal tidak boleh kosong atau negatif.');
       return;
     }
 
@@ -63,17 +69,17 @@ function Pengaturan() {
       const respons = await klienApi.post('/shift/buka', { modal_awal: Number(modalAwal) });
       if (respons.data.sukses) {
         aturShiftAktif(respons.data.data);
-        alert("Shift baru berhasil dibuka! Selamat melayani pelanggan.");
+        tambahNotifikasi('sukses', 'Shift baru berhasil dibuka! Selamat melayani pelanggan.');
       }
     } catch (err) {
-      alert(err.response?.data?.pesan || "Gagal membuka shift.");
+      tambahNotifikasi('error', err.response?.data?.pesan || 'Gagal membuka shift.');
     }
   };
 
   const tanganiTutupShift = async (e) => {
     e.preventDefault();
     if (!kasAkhir || Number(kasAkhir) < 0) {
-      alert("Kas akhir wajib diisi.");
+      tambahNotifikasi('peringatan', 'Kas akhir wajib diisi.');
       return;
     }
 
@@ -84,29 +90,34 @@ function Pengaturan() {
       });
 
       if (respons.data.sukses) {
-        alert(`Shift resmi ditutup.\nSelisih Laci Kasir: Rp ${selisihKas.toLocaleString('id-ID')}`);
+        const selisihLabel = selisihKas === 0
+          ? 'Kas cocok, tidak ada selisih.'
+          : selisihKas > 0
+            ? `Kelebihan kas: Rp ${selisihKas.toLocaleString('id-ID')}`
+            : `Kekurangan kas: Rp ${Math.abs(selisihKas).toLocaleString('id-ID')}`;
+        tambahNotifikasi('sukses', `Shift resmi ditutup. ${selisihLabel}`);
         aturShiftAktif(null);
         setKasAkhir('');
         setCatatan('');
       }
     } catch (err) {
-      alert("Gagal menutup shift.");
+      tambahNotifikasi('error', 'Gagal menutup shift.');
     }
   };
 
   const tanganiSinkronisasiManual = async () => {
     if (!antreanOffline.length) {
-      alert("Antrean offline kosong.");
+      tambahNotifikasi('info', 'Antrean offline kosong, tidak ada yang perlu disinkronisasi.');
       return;
     }
 
     setSedangSinkronisasi(true);
     try {
       const hasil = await sinkronisasiTransaksiOffline();
-      alert(hasil.pesan);
+      tambahNotifikasi(hasil.sukses ? 'sukses' : 'error', hasil.pesan);
       muatDaftarShiftDanLogs();
     } catch (e) {
-      alert("Sinkronisasi gagal dilakukan.");
+      tambahNotifikasi('error', 'Sinkronisasi gagal dilakukan.');
     } finally {
       setSedangSinkronisasi(false);
     }
@@ -177,7 +188,7 @@ function Pengaturan() {
                 </div>
                 <div>
                   <span className="text-on-surface-variant block text-[10px]">DIBUKA PADA:</span>
-                  <span className="font-bold text-[10px]">{shiftAktif.dibuka_pada?.split('T')[1].substring(0, 5)} WIB</span>
+                  <span className="font-bold text-[10px]">{shiftAktif.dibuka_pada ? new Date(shiftAktif.dibuka_pada).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '-'}</span>
                 </div>
                 <div>
                   <span className="text-on-surface-variant block text-[10px]">MODAL AWAL LACI:</span>

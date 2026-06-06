@@ -65,6 +65,20 @@ export const useTokoState = create((set, get) => ({
     set({ shiftAktif: dataShift });
   },
 
+  // Memperbarui total penjualan shift aktif setelah transaksi berhasil
+  tambahPenjualanShift: (totalBelanja, metodePembayaran) => {
+    const { shiftAktif } = get();
+    if (!shiftAktif) return;
+    const shiftBaru = {
+      ...shiftAktif,
+      total_penjualan: Number(shiftAktif.total_penjualan || 0) + Number(totalBelanja),
+      penjualan_tunai: Number(shiftAktif.penjualan_tunai || 0) + (metodePembayaran === 'tunai' ? Number(totalBelanja) : 0),
+      penjualan_non_tunai: Number(shiftAktif.penjualan_non_tunai || 0) + (metodePembayaran !== 'tunai' ? Number(totalBelanja) : 0)
+    };
+    localStorage.setItem('shift_aktif_pos', JSON.stringify(shiftBaru));
+    set({ shiftAktif: shiftBaru });
+  },
+
   // --- AKSI KERANJANG BELANJA ---
 
   tambahKeKeranjang: (barang) => {

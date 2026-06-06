@@ -2,26 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { useTokoState } from '../store/toko_state';
 import klienApi from '../api/klien_api';
 import Barcode from 'react-barcode';
+import { useNotifikasi } from '../components/NotifikasiPopup';
 
-// Helper untuk merender icon/gambar tanpa emoji
+// Helper untuk merender icon/gambar
 const renderIconAtauGambar = (url, sizeClass = "text-5xl") => {
   if (!url) return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>inventory_2</span>;
   if (url.startsWith('http') || url.startsWith('data:')) {
     return <img src={url} alt="gambar" className="w-full h-full object-cover" />;
   }
-  // Konversi emoji warisan jika ada
-  let icon = url;
-  if (url === '☕' || url === '🍵') icon = 'local_cafe';
-  else if (url === '🥐' || url === '🥪') icon = 'bakery_dining';
-  else if (url === '📦') icon = 'inventory_2';
-  
-  return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>{icon}</span>;
+  return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>{url}</span>;
 };
 
 function Barang() {
+  const { tambahNotifikasi } = useNotifikasi();
   const { sesiKasir } = useTokoState();
   const [daftarBarang, setDaftarBarang] = useState([]);
   const [kataKunciCari, setKataKunciCari] = useState('');
+  const [filterStatus, setFilterStatus] = useState('AKTIF');
   
   // State untuk form tambah/edit modal
   const [tampilkanModalForm, setTampilkanModalForm] = useState(false);
@@ -37,21 +34,38 @@ function Barang() {
   const [hargaPokok, setHargaPokok] = useState('');
   const [urlGambar, setUrlGambar] = useState('inventory_2');
   const [tipeSumberGambar, setTipeSumberGambar] = useState('icon'); // 'icon' | 'file'
+  const [isAktif, setIsAktif] = useState(1);
 
   const tanganiUnggahGambar = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      if (file.size > 1024 * 1024) {
-        alert("Ukuran berkas gambar terlalu besar! Maksimal adalah 1 MB.");
-        return;
-      }
-      const pembaca = new FileReader();
-      pembaca.onloadend = () => {
-        setUrlGambar(pembaca.result);
-      };
-      pembaca.readAsDataURL(file);
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      tambahNotifikasi('peringatan', 'Ukuran berkas gambar terlalu besar! Maksimal adalah 5 MB.');
+      return;
     }
+    const pembaca = new FileReader();
+    pembaca.onloadend = () => {
+      // Kompres gambar via Canvas API sebelum disimpan
+      // Resize ke maks 500x500 px, kualitas 0.75 → base64 < 100KB
+      const img = new Image();
+      img.onload = () => {
+        const MAKS_DIM = 300; // max 300x300px → base64 < 40KB, aman untuk MySQL TEXT
+        let { width, height } = img;
+        if (width > MAKS_DIM || height > MAKS_DIM) {
+          if (width > height) { height = Math.round(height * MAKS_DIM / width); width = MAKS_DIM; }
+          else { width = Math.round(width * MAKS_DIM / height); height = MAKS_DIM; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        const base64Terkompresi = canvas.toDataURL('image/jpeg', 0.65);
+        setUrlGambar(base64Terkompresi);
+      };
+      img.src = pembaca.result;
+    };
+    pembaca.readAsDataURL(file);
   };
+
 
   // State untuk melihat Target per Cabang
   const [tampilkanModalStok, setTampilkanModalStok] = useState(false);
@@ -63,19 +77,35 @@ function Barang() {
 
   // Modal State Tambahan
   const [modalHapusBarang, setModalHapusBarang] = useState({ tampil: false, id: null });
+  const [modalAktifBarang, setModalAktifBarang] = useState({ tampil: false, id: null });
   const [modalTarget, setModalTarget] = useState({ tampil: false, stokId: null, nilai_baru: '' });
 
   const muatBarang = async () => {
     try {
       const respons = await klienApi.get('/barang');
       if (respons.data.sukses) {
-        setDaftarBarang(respons.data.data);
-        
-        // Pilih beberapa barang secara acak untuk showcase progress target
-        const dataKritis = respons.data.data.slice(0, 3).map(b => ({
-          ...b,
-          terjual: Math.floor(Math.random() * 45) + 5,
-          target_harian: 50
+        const semuaBarang = respons.data.data;
+        setDaftarBarang(semuaBarang);
+
+        // Ambil data target & terjual REAL dari API untuk semua barang aktif
+        const cabangId = sesiKasir?.kasir?.cabang_id || sesiKasir?.cabang?.id;
+        const semuaAktif = semuaBarang.filter(b => b.is_aktif === 1);
+        const dataKritis = await Promise.all(semuaAktif.map(async (b) => {
+          try {
+            const res = await klienApi.get(`/barang/${b.id}/target`);
+            if (res.data.sukses && res.data.data.length > 0) {
+              // Ambil data stok sesuai cabang user yg login; fallback ke index 0
+              const stokCabang = cabangId
+                ? res.data.data.find(s => s.cabang_id === cabangId) || res.data.data[0]
+                : res.data.data[0];
+              return {
+                ...b,
+                terjual: stokCabang.terjual || 0,
+                target_harian: stokCabang.target_harian || 100
+              };
+            }
+          } catch (_) {}
+          return { ...b, terjual: 0, target_harian: 100 };
         }));
         setBarangKritis(dataKritis);
       }
@@ -90,8 +120,11 @@ function Barang() {
   };
 
   useEffect(() => {
-    muatBarang();
-  }, []);
+    // Tunggu sesiKasir tersedia agar cabangId tidak null
+    if (sesiKasir) {
+      muatBarang();
+    }
+  }, [sesiKasir]);
 
   const bukaTambahBarang = () => {
     setModeEdit(false);
@@ -104,6 +137,7 @@ function Barang() {
     setHargaPokok('');
     setUrlGambar('inventory_2');
     setTipeSumberGambar('icon');
+    setIsAktif(1);
     setTampilkanModalForm(true);
   };
 
@@ -117,6 +151,7 @@ function Barang() {
     setHargaJual(b.harga_jual.toString());
     setHargaPokok(b.harga_pokok?.toString() || '');
     setUrlGambar(b.url_gambar || 'inventory_2');
+    setIsAktif(b.is_aktif !== undefined ? b.is_aktif : 1);
     if (b.url_gambar && (b.url_gambar.startsWith('http') || b.url_gambar.startsWith('data:'))) {
       setTipeSumberGambar('file');
     } else {
@@ -134,18 +169,37 @@ function Barang() {
     try {
       const respons = await klienApi.delete(`/barang/${modalHapusBarang.id}`);
       if (respons.data.sukses) {
+        tambahNotifikasi('sukses', 'Produk berhasil dinonaktifkan.');
         setModalHapusBarang({ tampil: false, id: null });
         muatBarang();
       }
     } catch (err) {
-      alert("Hanya Manajer atau Admin Utama yang diizinkan menonaktifkan produk!");
+      tambahNotifikasi('error', 'Hanya Manajer atau Admin Utama yang diizinkan menonaktifkan produk!');
+    }
+  };
+
+  const tanganiAktifkanBarang = (id) => {
+    setModalAktifBarang({ tampil: true, id });
+  };
+
+  const eksekusiAktifkanBarang = async () => {
+    if (!modalAktifBarang.id) return;
+    try {
+      const respons = await klienApi.put(`/barang/${modalAktifBarang.id}`, { is_aktif: 1 });
+      if (respons.data.sukses) {
+        tambahNotifikasi('sukses', 'Produk berhasil diaktifkan kembali.');
+        setModalAktifBarang({ tampil: false, id: null });
+        muatBarang();
+      }
+    } catch (err) {
+      tambahNotifikasi('error', err.response?.data?.pesan || 'Gagal mengaktifkan produk. Pastikan Anda memiliki hak akses.');
     }
   };
 
   const simpanForm = async (e) => {
     e.preventDefault();
     if (!barcode || !namaBarang || !hargaJual || !hargaPokok) {
-      alert("Semua kolom bertanda bintang wajib diisi.");
+      tambahNotifikasi('peringatan', 'Semua kolom bertanda bintang wajib diisi.');
       return;
     }
 
@@ -156,7 +210,8 @@ function Barang() {
       satuan,
       harga_jual: Number(hargaJual),
       harga_pokok: Number(hargaPokok),
-      url_gambar: urlGambar
+      url_gambar: urlGambar,
+      is_aktif: isAktif
     };
 
     try {
@@ -168,12 +223,12 @@ function Barang() {
       }
 
       if (respons.data.sukses) {
-        alert(modeEdit ? "Barang berhasil diperbarui!" : "Barang baru berhasil ditambahkan!");
+        tambahNotifikasi('sukses', modeEdit ? 'Barang berhasil diperbarui!' : 'Barang baru berhasil ditambahkan!');
         setTampilkanModalForm(false);
         muatBarang();
       }
     } catch (err) {
-      alert(err.response?.data?.pesan || "Akses ditolak. Fitur ini memerlukan akses Manajer/Admin.");
+      tambahNotifikasi('error', err.response?.data?.pesan || 'Akses ditolak. Fitur ini memerlukan akses Manajer/Admin.');
     }
   };
 
@@ -202,27 +257,31 @@ function Barang() {
     e.preventDefault();
     const jumlah = parseInt(modalTarget.nilai_baru, 10);
     if (isNaN(jumlah) || jumlah <= 0) {
-      alert("Target harus berupa angka lebih besar dari 0.");
+      tambahNotifikasi('peringatan', 'Target harus berupa angka lebih besar dari 0.');
       return;
     }
 
     try {
       const respons = await klienApi.put(`/target/${modalTarget.stokId}`, { target_baru: jumlah });
       if (respons.data.sukses) {
-        // Update local state
+        tambahNotifikasi('sukses', 'Target harian berhasil diperbarui!');
         setStokBarangTerpilih(prev => prev.map(s => s.id === modalTarget.stokId ? { ...s, target_harian: jumlah } : s));
         setModalTarget({ tampil: false, stokId: null, nilai_baru: '' });
-        muatBarang(); // Refresh master list in background
+        muatBarang();
       }
     } catch (err) {
-      alert(err.response?.data?.pesan || "Akses ditolak. Fitur ini memerlukan akses Manajer/Admin.");
+      tambahNotifikasi('error', err.response?.data?.pesan || 'Akses ditolak. Fitur ini memerlukan akses Manajer/Admin.');
     }
   };
 
-  const barangTerfilter = daftarBarang.filter(b => 
-    b.nama_barang.toLowerCase().includes(kataKunciCari.toLowerCase()) || 
-    b.kode_barcode.includes(kataKunciCari)
-  );
+  const barangTerfilter = daftarBarang.filter(b => {
+    const cocokCari = b.nama_barang.toLowerCase().includes(kataKunciCari.toLowerCase()) || 
+                      b.kode_barcode.includes(kataKunciCari);
+    const cocokStatus = filterStatus === 'SEMUA' ? true : 
+                        filterStatus === 'AKTIF' ? b.is_aktif === 1 : 
+                        b.is_aktif === 0;
+    return cocokCari && cocokStatus;
+  });
 
   return (
     <div className="flex-1 p-6 overflow-y-auto font-mono text-xs text-on-surface">
@@ -245,22 +304,43 @@ function Barang() {
         </div>
 
         {/* 15.7 Progress Target Harian */}
-        <div className="w-full lg:w-[350px] bg-[#e0d2ff] text-tertiary-fixed border-2 border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] p-4">
-          <div className="flex items-center gap-2 font-black border-b border-tertiary-fixed/20 pb-2 mb-2 uppercase">
-            <span className="material-symbols-outlined text-base">track_changes</span>
+        <div className="w-full lg:w-[380px] bg-[#e0d2ff] border-2 border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col">
+          <div className="flex items-center gap-2 font-black border-b-2 border-on-surface px-4 py-3 bg-[#4f378a] text-white uppercase text-xs tracking-widest">
+            <span className="material-symbols-outlined text-base" style={{ fontVariationSettings: "'FILL' 1" }}>track_changes</span>
             PROGRESS TARGET HARIAN
           </div>
-          <div className="space-y-1.5">
-            {barangKritis.map(b => (
-              <div key={b.id} className="flex justify-between items-center text-[10px] bg-white/60 p-1 border border-tertiary-fixed/10">
-                <span className="font-bold">{b.nama_barang}</span>
-                <span className="bg-[#4ade80] text-on-surface font-black px-1.5 py-0.2 border border-on-surface">
-                  {b.terjual} / {b.target_harian}
-                </span>
+          <div className="p-4 space-y-3 flex-1">
+            {barangKritis.length > 0 ? barangKritis.map(b => {
+              const persen = Math.min(Math.round((b.terjual / b.target_harian) * 100), 100);
+              const warnaBg = persen >= 100 ? '#4ade80' : persen >= 60 ? '#ffdf93' : '#ffdad6';
+              const warnaBar = persen >= 100 ? '#16a34a' : persen >= 60 ? '#d97706' : '#ba1a1a';
+              return (
+                <div key={b.id} className="bg-white/70 border-2 border-on-surface p-2.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="font-black text-[10px] uppercase truncate max-w-[160px]">{b.nama_barang}</span>
+                    <span
+                      className="font-black text-[10px] px-1.5 py-0.5 border border-on-surface"
+                      style={{ backgroundColor: warnaBg }}
+                    >
+                      {b.terjual} / {b.target_harian}
+                    </span>
+                  </div>
+                  <div className="h-3 bg-surface border-2 border-on-surface overflow-hidden">
+                    <div
+                      className="h-full progress-brutal"
+                      style={{ width: `${persen}%`, backgroundColor: warnaBar }}
+                    />
+                  </div>
+                  <div className="text-[9px] font-bold mt-0.5 text-right" style={{ color: warnaBar }}>
+                    {persen}% tercapai
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="flex flex-col items-center justify-center py-6 gap-2 text-[#4f378a]">
+                <span className="material-symbols-outlined text-4xl">bar_chart</span>
+                <span className="text-[10px] font-bold text-center uppercase">Belum ada data target penjualan yang diset.</span>
               </div>
-            ))}
-            {barangKritis.length === 0 && (
-              <div className="text-[10px] text-center italic">Belum ada data target penjualan yang diset.</div>
             )}
           </div>
         </div>
@@ -271,14 +351,25 @@ function Barang() {
       <div className="bg-surface border-2 border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
         
         {/* Search Header */}
-        <div className="p-4 border-b-2 border-on-surface bg-surface-container flex justify-between items-center">
+        <div className="p-4 border-b-2 border-on-surface bg-surface-container flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="font-black text-sm uppercase">DAFTAR BARANG ({barangTerfilter.length})</div>
-          <input 
-            value={kataKunciCari}
-            onChange={(e) => setKataKunciCari(e.target.value)}
-            placeholder="Cari nama barang / barcode..."
-            className="bg-surface border-2 border-on-surface px-3 py-1 font-mono text-xs focus:outline-none w-64 uppercase"
-          />
+          <div className="flex gap-2 w-full md:w-auto">
+            <select 
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-[#e0d2ff] border-2 border-on-surface px-3 py-1 font-mono text-xs focus:outline-none uppercase font-bold cursor-pointer"
+            >
+              <option value="AKTIF">Status: Aktif</option>
+              <option value="NONAKTIF">Status: Nonaktif</option>
+              <option value="SEMUA">Status: Semua</option>
+            </select>
+            <input 
+              value={kataKunciCari}
+              onChange={(e) => setKataKunciCari(e.target.value)}
+              placeholder="Cari nama barang / barcode..."
+              className="bg-surface border-2 border-on-surface px-3 py-1 font-mono text-xs focus:outline-none w-full md:w-64 uppercase"
+            />
+          </div>
         </div>
 
         {/* Table Container */}
@@ -342,7 +433,7 @@ function Barang() {
                     >
                       <span className="material-symbols-outlined block text-xs">track_changes</span>
                     </button>
-                    {(sesiKasir.kasir.peran === 'admin' || sesiKasir.kasir.peran === 'manajer') && (
+                    {(sesiKasir?.kasir?.peran === 'admin' || sesiKasir?.kasir?.peran === 'manajer') && (
                       <>
                         <button 
                           onClick={() => bukaEditBarang(b)}
@@ -350,12 +441,23 @@ function Barang() {
                         >
                           <span className="material-symbols-outlined block text-xs">edit</span>
                         </button>
-                        <button 
-                          onClick={() => tanganiHapusBarang(b.id)}
-                          className="bg-[#ffdad6] border border-on-surface p-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[0.5px] hover:translate-y-[0.5px] hover:shadow-none klik-brutal text-error"
-                        >
-                          <span className="material-symbols-outlined block text-xs">delete</span>
-                        </button>
+                        {b.is_aktif === 1 ? (
+                          <button 
+                            onClick={() => tanganiHapusBarang(b.id)}
+                            className="bg-[#ffdad6] border border-on-surface p-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[0.5px] hover:translate-y-[0.5px] hover:shadow-none klik-brutal text-error"
+                            title="Nonaktifkan Barang"
+                          >
+                            <span className="material-symbols-outlined block text-xs">delete</span>
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => tanganiAktifkanBarang(b.id)}
+                            className="bg-[#d1fae5] border border-on-surface p-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[0.5px] hover:translate-y-[0.5px] hover:shadow-none klik-brutal text-[#166534]"
+                            title="Aktifkan Kembali Barang"
+                          >
+                            <span className="material-symbols-outlined block text-xs">refresh</span>
+                          </button>
+                        )}
                       </>
                     )}
                   </td>
@@ -516,6 +618,23 @@ function Barang() {
               </div>
             </div>
 
+            {/* Status Aktif/Nonaktif (Hanya muncul jika mode edit) */}
+            {modeEdit && (
+              <div className="mt-4 flex items-center gap-3 bg-surface-container-low p-3 border-2 border-on-surface">
+                <label className="font-bold uppercase text-[10px] flex-1">Status Barang (Aktif/Nonaktif)</label>
+                <button
+                  type="button"
+                  onClick={() => setIsAktif(isAktif === 1 ? 0 : 1)}
+                  className={`relative w-12 h-6 rounded-full border-2 border-on-surface transition-colors ${isAktif === 1 ? 'bg-[#4ade80]' : 'bg-surface-container-highest'}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 bg-on-surface rounded-full transition-transform ${isAktif === 1 ? 'left-6' : 'left-0.5'}`}></div>
+                </button>
+                <span className={`font-black text-xs ${isAktif === 1 ? 'text-[#166534]' : 'text-on-surface-variant'}`}>
+                  {isAktif === 1 ? 'AKTIF' : 'NONAKTIF'}
+                </span>
+              </div>
+            )}
+
             <button
               type="submit"
               className="w-full bg-[#4ade80] text-on-surface py-3 border-2 border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none transition-all font-black text-xs mt-4 uppercase"
@@ -555,7 +674,8 @@ function Barang() {
                       </div>
                       <div className="text-[8px] text-on-surface-variant mt-0.5 font-bold uppercase">Terjual</div>
                     </div>
-                    {(sesiKasir.kasir.peran === 'admin' || sesiKasir.kasir.peran === 'manajer') && (
+                    {(sesiKasir?.kasir?.peran === 'admin' ||
+                      (sesiKasir?.kasir?.peran === 'manajer' && s.cabang_id === (sesiKasir?.kasir?.cabang_id || sesiKasir?.cabang?.id))) && (
                       <button 
                         onClick={() => tambahStokCabang(s.id)}
                         className="bg-[#4f378a] border border-on-surface p-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[0.5px] hover:translate-y-[0.5px] hover:shadow-none klik-brutal text-[#ffffff]"
@@ -593,6 +713,31 @@ function Barang() {
                 className="flex-1 bg-error text-on-error font-black border-2 border-on-surface p-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all uppercase"
               >
                 Ya, Nonaktifkan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalAktifBarang.tampil && (
+        <div className="fixed inset-0 z-[100] bg-[#1d1b20]/60 flex items-center justify-center p-4">
+          <div className="bg-surface border-4 border-[#16a34a] shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full max-w-sm p-6 relative font-mono text-center">
+            <span className="material-symbols-outlined text-5xl text-[#16a34a] mb-2">check_circle</span>
+            <h2 className="font-black text-lg uppercase mb-4">Aktifkan Barang?</h2>
+            <p className="text-sm mb-6">Barang yang dinonaktifkan akan kembali muncul di katalog. Lanjutkan?</p>
+            
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setModalAktifBarang({ tampil: false, id: null })}
+                className="flex-1 bg-surface-container-highest text-on-surface font-black border-2 border-on-surface p-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all uppercase"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={eksekusiAktifkanBarang}
+                className="flex-1 bg-[#16a34a] text-white font-black border-2 border-on-surface p-3 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all uppercase"
+              >
+                Ya, Aktifkan
               </button>
             </div>
           </div>

@@ -30,6 +30,31 @@
   box-shadow: 1px 1px 0px 0px rgba(0,0,0,1) !important;
 }
 
+/* Notification slide-in from right */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.notif-masuk {
+  animation: slideInRight 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Progress bar fill animation */
+@keyframes progressFill {
+  from { width: 0%; }
+}
+
+.progress-brutal {
+  animation: progressFill 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }

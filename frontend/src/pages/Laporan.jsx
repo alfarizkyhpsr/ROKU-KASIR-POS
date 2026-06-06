@@ -289,10 +289,11 @@ function Laporan() {
               {riwayatTransaksi.map(tx => (
                 <tr key={tx.id} className="border-b border-on-surface hover:bg-surface-container-low/50">
                   <td className="p-3 border-r border-on-surface font-bold">{tx.kode_transaksi}</td>
-                  {/* Tampilkan tanggal + jam, bukan hanya tanggal */}
                   <td className="p-3 border-r border-on-surface">
-                    <div>{tx.dibuat_pada?.split('T')[0]}</div>
-                    <div className="text-[9px] text-on-surface-variant">{tx.dibuat_pada?.split('T')[1]?.substring(0, 5)} WIB</div>
+                    <div>{tx.dibuat_pada ? new Date(tx.dibuat_pada).toLocaleDateString('id-ID') : '-'}</div>
+                    <div className="text-[9px] text-on-surface-variant">
+                      {tx.dibuat_pada ? new Date(tx.dibuat_pada).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '-'}
+                    </div>
                   </td>
                   <td className="p-3 border-r border-on-surface uppercase font-bold">{tx.nama_cabang || "Pusat"}</td>
                   <td className="p-3 border-r border-on-surface">{tx.nama_kasir || "Kasir"}</td>

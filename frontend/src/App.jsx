@@ -6,8 +6,10 @@ import Barang from './pages/Barang';
 import Laporan from './pages/Laporan';
 import Pengaturan from './pages/Pengaturan';
 import ManajemenSDM from './pages/ManajemenSDM';
+import { NotifikasiProvider, useNotifikasi } from './components/NotifikasiPopup';
 
-function App() {
+function AppDalam() {
+  const { tambahNotifikasi } = useNotifikasi();
   const {
     sesiKasir,
     halamanAktif,
@@ -38,7 +40,7 @@ function App() {
       console.log("Mendeteksi status online. Menjalankan auto-sinkronisasi...");
       sinkronisasiTransaksiOffline().then(hasil => {
         if (hasil.sukses) {
-          alert("Koneksi pulih! 2.2.3 Antrean transaksi offline Anda berhasil disinkronisasikan otomatis.");
+          tambahNotifikasi('sukses', 'Koneksi pulih! Antrean transaksi offline berhasil disinkronisasikan otomatis.');
         }
       });
     }
@@ -259,17 +261,19 @@ function App() {
               Terminal Kasir
             </button>
 
-            {/* Kelola Barang */}
-            <button
-              onClick={() => aturHalaman('barang')}
-              className={`w-[calc(100%-16px)] flex items-center gap-3 p-3 m-2 font-mono text-sm font-bold border-2 transition-all ${halamanAktif === 'barang'
-                ? 'bg-tertiary-fixed text-on-tertiary-fixed border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]'
-                : 'text-on-surface-variant border-transparent hover:bg-surface-container-high hover:border-on-surface hover:translate-x-[2px]'
-                }`}
-            >
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: halamanAktif === 'barang' ? "'FILL' 1" : "'FILL' 0" }}>inventory_2</span>
-              Kelola Barang
-            </button>
+            {/* Kelola Barang (Hanya Manajer/Admin) */}
+            {(sesiKasir.kasir.peran === 'admin' || sesiKasir.kasir.peran === 'manajer') && (
+              <button
+                onClick={() => aturHalaman('barang')}
+                className={`w-[calc(100%-16px)] flex items-center gap-3 p-3 m-2 font-mono text-sm font-bold border-2 transition-all ${halamanAktif === 'barang'
+                  ? 'bg-tertiary-fixed text-on-tertiary-fixed border-on-surface shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]'
+                  : 'text-on-surface-variant border-transparent hover:bg-surface-container-high hover:border-on-surface hover:translate-x-[2px]'
+                  }`}
+              >
+                <span className="material-symbols-outlined" style={{ fontVariationSettings: halamanAktif === 'barang' ? "'FILL' 1" : "'FILL' 0" }}>inventory_2</span>
+                Kelola Barang
+              </button>
+            )}
 
             {/* Laporan & Omzet */}
             <button
@@ -324,6 +328,14 @@ function App() {
 
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <NotifikasiProvider>
+      <AppDalam />
+    </NotifikasiProvider>
   );
 }
 

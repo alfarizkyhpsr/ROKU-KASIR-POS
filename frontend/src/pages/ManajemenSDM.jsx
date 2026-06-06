@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useTokoState } from '../store/toko_state';
 import klienApi from '../api/klien_api';
+import { useNotifikasi } from '../components/NotifikasiPopup';
 
 function ManajemenSDM() {
+  const { tambahNotifikasi } = useNotifikasi();
   const { sesiKasir, perbaruiSesiCabang } = useTokoState();
   const isAdmin = sesiKasir.kasir.peran === 'admin';
   const isManager = sesiKasir.kasir.peran === 'manajer';
@@ -22,10 +24,21 @@ function ManajemenSDM() {
   // Form State
   const [formCabang, setFormCabang] = useState({ nama_cabang: '', kode_cabang: '', kota: '' });
   const [formEditCabang, setFormEditCabang] = useState({ id: null, nama_cabang: '', kode_cabang: '', kota: '' });
-  const [formKasir, setFormKasir] = useState({ nama_pengguna: '', kata_sandi: '', pin: '', nama_lengkap: '', peran: 'kasir', cabang_id: isAdmin ? '' : sesiKasir.kasir.cabang_id });
-  const [formEditKasir, setFormEditKasir] = useState({ id: null, nama_pengguna: '', kata_sandi: '', pin: '', nama_lengkap: '', peran: 'kasir', cabang_id: '' });
+  const [formKasir, setFormKasir] = useState({ nama_pengguna: '', pin: '', nama_lengkap: '', peran: 'kasir', cabang_id: isAdmin ? '' : sesiKasir.kasir.cabang_id });
+  const [formEditKasir, setFormEditKasir] = useState({ id: null, nama_pengguna: '', pin: '', nama_lengkap: '', peran: 'kasir', cabang_id: '' });
   const [modalKonfirmasiHapus, setModalKonfirmasiHapus] = useState({ tampil: false, id: null });
   const [modalKonfirmasiHapusCabang, setModalKonfirmasiHapusCabang] = useState({ tampil: false, id: null });
+
+  // Derive nama manajer aktif per cabang dari daftarKasir (sumber kebenaran realtime)
+  const manajerPerCabang = React.useMemo(() => {
+    const map = {};
+    daftarKasir.forEach(k => {
+      if (k.peran === 'manajer' && k.is_aktif) {
+        map[k.cabang_id] = k.nama_lengkap;
+      }
+    });
+    return map;
+  }, [daftarKasir]);
 
   // Fetch Data
   const muatData = async () => {
@@ -54,18 +67,19 @@ function ManajemenSDM() {
   const simpanCabang = async (e) => {
     e.preventDefault();
     if (!formCabang.nama_cabang || !formCabang.kode_cabang || !formCabang.kota) {
-      alert("Semua field cabang wajib diisi.");
+      tambahNotifikasi('peringatan', 'Semua field cabang wajib diisi.');
       return;
     }
 
     try {
       const res = await klienApi.post('/cabang', formCabang);
       if (res.data.sukses) {
+        tambahNotifikasi('sukses', 'Cabang baru berhasil ditambahkan!');
         muatData();
         setModalCabang(false);
       }
     } catch (e) {
-      alert("Gagal menambah cabang.");
+      tambahNotifikasi('error', 'Gagal menambah cabang.');
     }
   };
 
@@ -77,7 +91,7 @@ function ManajemenSDM() {
   const simpanEditCabang = async (e) => {
     e.preventDefault();
     if (!formEditCabang.nama_cabang || !formEditCabang.kode_cabang || !formEditCabang.kota) {
-      alert("Semua field cabang wajib diisi.");
+      tambahNotifikasi('peringatan', 'Semua field cabang wajib diisi.');
       return;
     }
 
@@ -88,18 +102,20 @@ function ManajemenSDM() {
         kota: formEditCabang.kota
       });
       if (res.data.sukses) {
-        // Jika cabang yang diedit adalah cabang user yang sedang login, perbarui navbar
         perbaruiSesiCabang({
           id: formEditCabang.id,
           nama_cabang: formEditCabang.nama_cabang,
           kode_cabang: formEditCabang.kode_cabang,
           kota: formEditCabang.kota
         });
+        tambahNotifikasi('sukses', 'Data cabang berhasil diperbarui!');
         muatData();
         setModalEditCabang(false);
       }
     } catch (e) {
-      alert("Gagal memperbarui cabang.");
+      const pesan = e.response?.data?.pesan || e.message || 'Gagal memperbarui cabang.';
+      console.error('Error simpanEditCabang:', e);
+      tambahNotifikasi('error', pesan);
     }
   };
 
@@ -111,17 +127,18 @@ function ManajemenSDM() {
     if (!modalKonfirmasiHapusCabang.id) return;
     try {
       await klienApi.delete(`/cabang/${modalKonfirmasiHapusCabang.id}?permanen=${permanen}`);
+      tambahNotifikasi('sukses', permanen ? 'Cabang berhasil dihapus permanen.' : 'Cabang berhasil dinonaktifkan.');
       setModalKonfirmasiHapusCabang({ tampil: false, id: null });
       muatData();
     } catch (e) {
-      alert("Gagal menghapus cabang.");
+      tambahNotifikasi('error', 'Gagal menghapus cabang.');
     }
   };
 
   // --- CRUD KASIR ---
   const tanganiTambahKasir = () => {
     setFormKasir({
-      nama_pengguna: '', kata_sandi: '', pin: '', nama_lengkap: '',
+      nama_pengguna: '', pin: '', nama_lengkap: '',
       peran: 'kasir', cabang_id: isAdmin ? '' : sesiKasir.kasir.cabang_id
     });
     setModalKasir(true);
@@ -129,51 +146,44 @@ function ManajemenSDM() {
 
   const simpanKasir = async (e) => {
     e.preventDefault();
-    if (!formKasir.nama_pengguna || !formKasir.kata_sandi || !formKasir.pin || !formKasir.nama_lengkap || !formKasir.cabang_id) {
-      alert("Semua field kasir wajib diisi.");
+    if (!formKasir.nama_pengguna || !formKasir.pin || !formKasir.nama_lengkap || !formKasir.cabang_id) {
+      tambahNotifikasi('peringatan', 'Semua field kasir wajib diisi.');
       return;
     }
 
     try {
       const res = await klienApi.post('/kasir', formKasir);
       if (res.data.sukses) {
-        muatData();
+        tambahNotifikasi('sukses', 'Akun karyawan baru berhasil ditambahkan!');
+        await muatData(); // reload cabang+kasir sekaligus agar nama manajer langsung tampil
         setModalKasir(false);
       }
     } catch (e) {
-      alert(e.response?.data?.pesan || "Gagal menambah akun.");
+      tambahNotifikasi('error', e.response?.data?.pesan || 'Gagal menambah akun.');
     }
   };
 
   const tanganiEditKasir = (kasir) => {
-    setFormEditKasir({
-      ...kasir,
-      kata_sandi: '', // Kosongkan kata sandi untuk diedit jika perlu
-    });
+    setFormEditKasir({ ...kasir, pin: '' });
     setModalEditKasir(true);
   };
 
   const simpanEditKasir = async (e) => {
     e.preventDefault();
     if (!formEditKasir.nama_pengguna || !formEditKasir.pin || !formEditKasir.nama_lengkap || !formEditKasir.cabang_id) {
-      alert("Semua field bertanda bintang wajib diisi.");
+      tambahNotifikasi('peringatan', 'Semua field bertanda bintang wajib diisi.');
       return;
     }
 
     try {
-      // payload bisa tanpa kata sandi
-      const payload = { ...formEditKasir };
-      if (!payload.kata_sandi) {
-        delete payload.kata_sandi;
-      }
-
-      const res = await klienApi.put(`/kasir/${formEditKasir.id}`, payload);
+      const res = await klienApi.put(`/kasir/${formEditKasir.id}`, formEditKasir);
       if (res.data.sukses) {
-        muatData();
+        tambahNotifikasi('sukses', 'Data karyawan berhasil diperbarui!');
+        await muatData();
         setModalEditKasir(false);
       }
     } catch (e) {
-      alert(e.response?.data?.pesan || "Gagal memperbarui akun.");
+      tambahNotifikasi('error', e.response?.data?.pesan || 'Gagal memperbarui akun.');
     }
   };
 
@@ -185,10 +195,11 @@ function ManajemenSDM() {
     if (!modalKonfirmasiHapus.id) return;
     try {
       await klienApi.delete(`/kasir/${modalKonfirmasiHapus.id}?permanen=${permanen}`);
+      tambahNotifikasi('sukses', permanen ? 'Akun karyawan berhasil dihapus permanen.' : 'Akun karyawan berhasil dinonaktifkan.');
       setModalKonfirmasiHapus({ tampil: false, id: null });
       muatData();
     } catch (e) {
-      alert("Gagal menghapus akun.");
+      tambahNotifikasi('error', 'Gagal menghapus akun.');
     }
   };
 
@@ -245,7 +256,7 @@ function ManajemenSDM() {
                   <td className="p-3 border-r-2 border-on-surface">{c.kode_cabang}</td>
                   <td className="p-3 border-r-2 border-on-surface uppercase font-bold">{c.nama_cabang}</td>
                   <td className="p-3 border-r-2 border-on-surface">{c.kota}</td>
-                  <td className="p-3 border-r-2 border-on-surface italic">{c.nama_manajer || '-'}</td>
+                  <td className="p-3 border-r-2 border-on-surface italic">{manajerPerCabang[c.id] || c.nama_manajer || '-'}</td>
                   <td className="p-3 border-r-2 border-on-surface text-center flex justify-center gap-2">
                     <button
                       onClick={() => tanganiEditCabang(c)}
@@ -355,7 +366,8 @@ function ManajemenSDM() {
                   <input
                     type="text"
                     value={formCabang.kode_cabang}
-                    onChange={(e) => setFormCabang({ ...formCabang, kode_cabang: e.target.value })}
+                    onChange={(e) => setFormCabang({ ...formCabang, kode_cabang: e.target.value.toUpperCase().replace(/\s+/g, '_').slice(0, 10) })}
+                    maxLength="10"
                     className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none uppercase"
                     placeholder="Cth: CAB03"
                     required
@@ -418,17 +430,6 @@ function ManajemenSDM() {
                     onChange={(e) => setFormKasir({ ...formKasir, nama_pengguna: e.target.value.toLowerCase() })}
                     className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none"
                     placeholder="username"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1 uppercase text-[10px]">Kata Sandi *</label>
-                  <input
-                    type="password"
-                    value={formKasir.kata_sandi}
-                    onChange={(e) => setFormKasir({ ...formKasir, kata_sandi: e.target.value })}
-                    className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none"
-                    placeholder="***"
                     required
                   />
                 </div>
@@ -586,7 +587,8 @@ function ManajemenSDM() {
                   <input
                     type="text"
                     value={formEditCabang.kode_cabang}
-                    onChange={(e) => setFormEditCabang({ ...formEditCabang, kode_cabang: e.target.value })}
+                    onChange={(e) => setFormEditCabang({ ...formEditCabang, kode_cabang: e.target.value.toUpperCase().replace(/\s+/g, '_').slice(0, 10) })}
+                    maxLength="10"
                     className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none uppercase"
                     required
                   />
@@ -646,16 +648,6 @@ function ManajemenSDM() {
                     onChange={(e) => setFormEditKasir({ ...formEditKasir, nama_pengguna: e.target.value.toLowerCase() })}
                     className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none"
                     required
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1 uppercase text-[10px]">Kata Sandi Baru</label>
-                  <input
-                    type="password"
-                    value={formEditKasir.kata_sandi}
-                    onChange={(e) => setFormEditKasir({ ...formEditKasir, kata_sandi: e.target.value })}
-                    className="w-full border-2 border-on-surface p-2 bg-surface-container-lowest focus:bg-[#e0d2ff]/20 outline-none placeholder:text-[9px]"
-                    placeholder="(Kosongkan jika tidak diubah)"
                   />
                 </div>
               </div>

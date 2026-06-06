@@ -1,23 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useTokoState } from '../store/toko_state';
 import klienApi from '../api/klien_api';
+import { useNotifikasi } from '../components/NotifikasiPopup';
 
-// Helper untuk merender icon/gambar tanpa emoji
+// Helper untuk merender icon/gambar
 const renderIconAtauGambar = (url, sizeClass = "text-5xl") => {
   if (!url) return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>inventory_2</span>;
   if (url.startsWith('http') || url.startsWith('data:')) {
     return <img src={url} alt="gambar" className="w-full h-full object-cover" />;
   }
-  // Konversi emoji warisan jika ada
-  let icon = url;
-  if (url === '☕' || url === '🍵') icon = 'local_cafe';
-  else if (url === '🥐' || url === '🥪') icon = 'bakery_dining';
-  else if (url === '📦') icon = 'inventory_2';
-
-  return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>{icon}</span>;
+  return <span className={`material-symbols-outlined ${sizeClass} text-outline-variant`}>{url}</span>;
 };
 
 function Kasir() {
+  const { tambahNotifikasi } = useNotifikasi();
   const {
     sesiKasir,
     keranjang,
@@ -28,7 +24,8 @@ function Kasir() {
     perbaruiJumlahKeranjang,
     kosongkanKeranjang,
     tambahAntreanOffline,
-    aturHalaman
+    aturHalaman,
+    tambahPenjualanShift
   } = useTokoState();
 
   const [daftarBarang, setDaftarBarang] = useState([]);
@@ -93,7 +90,7 @@ function Kasir() {
   const selesaikanTransaksi = async () => {
     const bayar = Number(jumlahBayar) || 0;
     if (bayar < totalTagihan && metodePembayaran === 'tunai') {
-      alert("Uang pembayaran kurang!");
+      tambahNotifikasi('peringatan', 'Uang pembayaran kurang dari total tagihan!');
       return;
     }
 
@@ -127,6 +124,9 @@ function Kasir() {
           tambahAntreanOffline(payloadTransaksi);
         }
 
+        // Update nominal shift aktif di UI
+        tambahPenjualanShift(totalTagihan, metodePembayaran);
+
         // Tampilkan modal sukses struk
         setTampilkanModalBayar(false);
         setTampilkanModalSukses(true);
@@ -134,7 +134,7 @@ function Kasir() {
       }
     } catch (err) {
       console.error("Gagal memproses transaksi:", err);
-      alert("Terjadi kesalahan koneksi backend. Silakan gunakan mode OFFLINE.");
+      tambahNotifikasi('error', 'Terjadi kesalahan koneksi backend. Silakan gunakan mode OFFLINE.');
     }
   };
 
@@ -193,7 +193,7 @@ function Kasir() {
               key={barang.id}
               onClick={() => {
                 if (!shiftAktif && apakahOnline) {
-                  alert("Anda harus membuka shift baru terlebih dahulu di menu 'Shift & Sinkronisasi' sebelum melayani transaksi!");
+                  tambahNotifikasi('peringatan', "Buka shift kasir terlebih dahulu di menu 'Shift & Sinkronisasi' sebelum melayani transaksi!");
                   return;
                 }
                 tambahKeKeranjang(barang);
@@ -449,7 +449,7 @@ function Kasir() {
               <div className="border-t border-on-surface/20 pt-2 space-y-1">
                 <div className="flex justify-between">
                   <span>Subtotal</span>
-                  <span>Rp {hitungSubtotal().toLocaleString('id-ID')}</span>
+                  <span>Rp {(transaksiTerakhir.total_belanja - transaksiTerakhir.pajak).toLocaleString('id-ID')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Pajak (10%)</span>
