@@ -29,6 +29,8 @@ frontend/.vite/
 # File ini hanya untuk keperluan lokal, tidak perlu di-repo
 cleanup-gcp.ps1
 deploy-final.ps1
+update-deploy.ps1
+LinkDeploy.md
 
 # ─── Log Files ──────────────────────────────────────────────
 *.log
