@@ -85,9 +85,7 @@ ROKU-KASIR-POS/
 ├── Dockerfile                # Build frontend+gateway (Service 1)
 ├── cloudbuild.yaml           # Pipeline CI/CD Cloud Build
 ├── .dockerignore
-├── .gitignore
-├── LinkDeploy.md             # URL service yang sudah di-deploy
-└── Overview Project.md       # Pemetaan terhadap spesifikasi tugas
+└── .gitignore
 ```
 
 ---
